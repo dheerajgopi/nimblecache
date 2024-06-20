@@ -1,28 +1,32 @@
-use std::{io::{Read, Write}, net::TcpListener};
+use tokio::net::TcpListener;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-fn main() {
+#[tokio::main]
+async fn main() {
     println!("Starting TCP listener on port 6379");
 
-    let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
-    
-    for stream in listener.incoming() {
+    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+
+    loop {
+        let stream = listener.accept().await;
+
         match stream {
-            Ok(mut stream) => {
-                println!("accepted new connection");
+            Ok((mut stream, _)) => {
+                println!("accepted new connection from: {:?}", stream.peer_addr().unwrap());
 
-                let mut buff = [0; 512];
+                tokio::spawn(async move {
+                    let mut buf = [0; 512];
 
-                loop {
-                    // read the stream and do nothing with it for now
-                    let read_count = stream.read(&mut buff).unwrap();
-                    if read_count == 0 {
-                        break;
+                    loop {
+                        let read_count = stream.read(&mut buf).await.unwrap();
+                        if read_count == 0 {
+                            break;
+                        }
+
+                        // hardcoded 'PONG' response
+                        stream.write(b"+PONG\r\n").await.unwrap();
                     }
-    
-                    // hardcoded PONG response
-                    stream.write(b"+PONG\r\n").unwrap();
-                }
-
+                });
             }
             Err(e) => {
                 println!("error: {}", e);
