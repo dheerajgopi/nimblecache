@@ -7,3 +7,5 @@ edition = "2021"
 
 [dependencies]
 tokio = { version = "1.38.0", features = ["rt-multi-thread", "macros", "net", "io-util"] }
+bytes = "1.6.0"
+anyhow = "1.0.86"
