@@ -6,6 +6,7 @@ pub enum DataType {
     SimpleString(String),
     BulkString(String),
     Array(Vec<DataType>),
+    SimpleError(String),
 }
 
 impl DataType {
@@ -20,6 +21,9 @@ impl DataType {
             }
             '*' => {
                 Self::new_array(buffer)
+            }
+            '-' => {
+                Self::new_simple_error(buffer)
             }
             _ => {
                 Err(anyhow!("Invalid RESP data type {:?}", buffer))
@@ -88,6 +92,23 @@ impl DataType {
         return Ok((DataType::Array(items), bytes_consumed));
     }
 
+    pub fn new_simple_error(buffer: BytesMut) -> Result<(DataType, usize)> {
+        if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
+            let utf8_str = String::from_utf8(buf_data.to_vec());
+
+            return match utf8_str {
+                Ok(simple_str) => {
+                    Ok((DataType::SimpleError(simple_str), len + 1))
+                }
+                Err(_) => {
+                    Err(anyhow!("Invalid UTF-8 string {:?}", buffer))
+                }
+            }
+        }
+
+        return Err(anyhow!("Invalid value for simple error {:?}", buffer))
+    }
+
     pub fn serialize(&self) -> String {
         return match self {
             DataType::SimpleString(ss) => format!("+{}\r\n", ss),
@@ -97,7 +118,8 @@ impl DataType {
                 ser_array.push_str(arr.iter().map(|v| v.serialize()).collect::<String>().as_str());
 
                 ser_array
-            }
+            },
+            DataType::SimpleError(err) => format!("-{}\r\n", err),
         }
     }
 

@@ -3,8 +3,7 @@ mod commands;
 
 use tokio::net::TcpListener;
 use anyhow::Result;
-use crate::commands::parser::get_command;
-use crate::commands::traits::CommandExecutor;
+use crate::commands::cmd::Cmd;
 use crate::protocol::resp::resp2::Resp2Handler;
 use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::datatypes::DataType;
@@ -41,26 +40,7 @@ async fn main() {
                                 panic!("Error reading the RESP command")
                             }
                         };
-                        let cmd = get_command(&resp_command);
-                        let (cmd_executor, args) = match cmd {
-                            Ok(cmd) => {
-                                (cmd.0, cmd.1)
-                            }
-                            Err(_) => {
-                                panic!("Invalid command")
-                            }
-                        };
-
-                        let args = args.iter().map(|a| a).collect::<Vec<&DataType>>();
-                        let res = cmd_executor.execute(args.as_slice());
-                        let res = match res {
-                            Ok(r) => {
-                                r
-                            }
-                            Err(_) => {
-                                panic!("Command execution failed")
-                            }
-                        };
+                        let res = Cmd::execute(&resp_command);
 
                         resp_handler.write(&res).await.unwrap();
                     }
