@@ -4,7 +4,7 @@ use crate::protocol::resp::types::RespType;
 pub struct Ping {}
 
 impl CommandExecutor for Ping {
-    fn execute(&self, _: &[&RespType]) -> RespType {
+    fn execute(&mut self, _: &[&RespType]) -> RespType {
         return RespType::SimpleString("PONG".into());
     }
 }

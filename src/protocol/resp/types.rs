@@ -5,6 +5,7 @@ use anyhow::{anyhow, Result};
 pub enum RespType {
     SimpleString(String),
     BulkString(String),
+    NullBulkString,
     Array(Vec<RespType>),
     SimpleError(String),
 }
@@ -67,6 +68,10 @@ impl RespType {
         }
     }
 
+    pub fn null_bulk_string() -> RespType {
+        RespType::NullBulkString
+    }
+
     pub fn new_array(buffer: BytesMut) -> Result<(RespType, usize)> {
         let (arr_len, mut bytes_consumed) = if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
             let arr_len = Self::parse_int_from_buf(buf_data)?;
@@ -113,6 +118,7 @@ impl RespType {
         return match self {
             RespType::SimpleString(ss) => format!("+{}\r\n", ss),
             RespType::BulkString(bs) => format!("${}\r\n{}\r\n", bs.chars().count(), bs),
+            RespType::NullBulkString => "-1\r\n".into(),
             RespType::Array(arr) => {
                 let mut ser_array = String::from(format!("*{}\r\n", arr.len()));
                 ser_array.push_str(arr.iter().map(|v| v.serialize()).collect::<String>().as_str());

@@ -1,5 +1,6 @@
 mod protocol;
 mod commands;
+mod storage;
 
 use tokio::net::TcpListener;
 use anyhow::Result;
@@ -7,12 +8,14 @@ use crate::commands::cmd::Cmd;
 use crate::protocol::resp::resp2::Resp2Handler;
 use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
+use crate::storage::store::Store;
 
 #[tokio::main]
 async fn main() {
     println!("Starting TCP listener on port 6379");
 
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    let storage = &mut Store::new_simple_map();
 
     loop {
         let stream = listener.accept().await;
@@ -40,7 +43,7 @@ async fn main() {
                                 panic!("Error reading the RESP command")
                             }
                         };
-                        let res = Cmd::execute(&resp_command);
+                        let res = Cmd::execute(&resp_command, storage);
 
                         resp_handler.write(&res).await.unwrap();
                     }
