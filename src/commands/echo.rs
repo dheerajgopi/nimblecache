@@ -1,12 +1,12 @@
 use crate::commands::traits::CommandExecutor;
-use crate::protocol::resp::datatypes::DataType;
+use crate::protocol::resp::types::RespType;
 
 pub struct Echo {}
 
 impl CommandExecutor for Echo {
-    fn execute(&self, args: &[&DataType]) -> DataType {
+    fn execute(&self, args: &[&RespType]) -> RespType {
         if args.len() == 0 {
-            return DataType::SimpleError("ERR wrong number of arguments for command".into());
+            return RespType::SimpleError("ERR wrong number of arguments for command".into());
         }
 
         args[0].clone()

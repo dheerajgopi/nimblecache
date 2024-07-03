@@ -1,5 +1,5 @@
-use crate::protocol::resp::datatypes::DataType;
+use crate::protocol::resp::types::RespType;
 
 pub trait CommandExecutor {
-    fn execute(&self, args: &[&DataType]) -> DataType;
+    fn execute(&self, args: &[&RespType]) -> RespType;
 }

@@ -2,15 +2,15 @@ use bytes::BytesMut;
 use anyhow::{anyhow, Result};
 
 #[derive(Clone, Debug)]
-pub enum DataType {
+pub enum RespType {
     SimpleString(String),
     BulkString(String),
-    Array(Vec<DataType>),
+    Array(Vec<RespType>),
     SimpleError(String),
 }
 
-impl DataType {
-    pub fn parse(buffer: BytesMut) -> Result<(DataType, usize)> {
+impl RespType {
+    pub fn parse(buffer: BytesMut) -> Result<(RespType, usize)> {
         let c = buffer[0] as char;
         return match c {
             '+' => {
@@ -31,13 +31,13 @@ impl DataType {
         }
     }
 
-    pub fn new_simple_string(buffer: BytesMut) -> Result<(DataType, usize)> {
+    pub fn new_simple_string(buffer: BytesMut) -> Result<(RespType, usize)> {
         if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
             let utf8_str = String::from_utf8(buf_data.to_vec());
 
             return match utf8_str {
                 Ok(simple_str) => {
-                    Ok((DataType::SimpleString(simple_str), len + 1))
+                    Ok((RespType::SimpleString(simple_str), len + 1))
                 }
                 Err(_) => {
                     Err(anyhow!("Invalid UTF-8 string {:?}", buffer))
@@ -48,7 +48,7 @@ impl DataType {
         return Err(anyhow!("Invalid value for simple string {:?}", buffer))
     }
 
-    pub fn new_bulk_string(buffer: BytesMut) -> Result<(DataType, usize)> {
+    pub fn new_bulk_string(buffer: BytesMut) -> Result<(RespType, usize)> {
         let (bulk_str_len, bytes_consumed) = if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
             let bulk_str_len = Self::parse_int_from_buf(buf_data)?;
             (bulk_str_len, len + 1)
@@ -61,13 +61,13 @@ impl DataType {
 
         match bulk_str {
             Ok(bs) => {
-                Ok((DataType::BulkString(bs), bulk_str_end_idx + 2))
+                Ok((RespType::BulkString(bs), bulk_str_end_idx + 2))
             }
             Err(_) => Err(anyhow!("Invalid UTF-8 string {:?}", buffer))
         }
     }
 
-    pub fn new_array(buffer: BytesMut) -> Result<(DataType, usize)> {
+    pub fn new_array(buffer: BytesMut) -> Result<(RespType, usize)> {
         let (arr_len, mut bytes_consumed) = if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
             let arr_len = Self::parse_int_from_buf(buf_data)?;
             (arr_len, len + 1)
@@ -75,7 +75,7 @@ impl DataType {
             return Err(anyhow!("Invalid value for array {:?}", buffer))
         };
 
-        let mut items: Vec<DataType> = vec![];
+        let mut items: Vec<RespType> = vec![];
         for _ in 0..arr_len {
             let item = Self::parse(BytesMut::from(&buffer[bytes_consumed..]));
             match item {
@@ -89,16 +89,16 @@ impl DataType {
             }
         }
 
-        return Ok((DataType::Array(items), bytes_consumed));
+        return Ok((RespType::Array(items), bytes_consumed));
     }
 
-    pub fn new_simple_error(buffer: BytesMut) -> Result<(DataType, usize)> {
+    pub fn new_simple_error(buffer: BytesMut) -> Result<(RespType, usize)> {
         if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
             let utf8_str = String::from_utf8(buf_data.to_vec());
 
             return match utf8_str {
                 Ok(simple_str) => {
-                    Ok((DataType::SimpleError(simple_str), len + 1))
+                    Ok((RespType::SimpleError(simple_str), len + 1))
                 }
                 Err(_) => {
                     Err(anyhow!("Invalid UTF-8 string {:?}", buffer))
@@ -111,15 +111,15 @@ impl DataType {
 
     pub fn serialize(&self) -> String {
         return match self {
-            DataType::SimpleString(ss) => format!("+{}\r\n", ss),
-            DataType::BulkString(bs) => format!("${}\r\n{}\r\n", bs.chars().count(), bs),
-            DataType::Array(arr) => {
+            RespType::SimpleString(ss) => format!("+{}\r\n", ss),
+            RespType::BulkString(bs) => format!("${}\r\n{}\r\n", bs.chars().count(), bs),
+            RespType::Array(arr) => {
                 let mut ser_array = String::from(format!("*{}\r\n", arr.len()));
                 ser_array.push_str(arr.iter().map(|v| v.serialize()).collect::<String>().as_str());
 
                 ser_array
             },
-            DataType::SimpleError(err) => format!("-{}\r\n", err),
+            RespType::SimpleError(err) => format!("-{}\r\n", err),
         }
     }
 

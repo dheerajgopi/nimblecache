@@ -6,7 +6,7 @@ use anyhow::Result;
 use crate::commands::cmd::Cmd;
 use crate::protocol::resp::resp2::Resp2Handler;
 use crate::protocol::resp::traits::{RespReader, RespWriter};
-use crate::protocol::resp::datatypes::DataType;
+use crate::protocol::resp::types::RespType;
 
 #[tokio::main]
 async fn main() {
@@ -24,7 +24,7 @@ async fn main() {
                 tokio::spawn(async move {
                     let mut resp_handler = Resp2Handler::new(&mut stream, 512);
                     loop {
-                        let resp_command: Result<Option<DataType>> = resp_handler.read().await;
+                        let resp_command: Result<Option<RespType>> = resp_handler.read().await;
                         let resp_command = match resp_command {
                             Ok(cmd) => {
                                 match cmd {

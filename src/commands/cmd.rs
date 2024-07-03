@@ -1,22 +1,22 @@
 use crate::commands::traits::CommandExecutor;
 use crate::commands::{echo, ping};
-use crate::protocol::resp::datatypes::DataType;
+use crate::protocol::resp::types::RespType;
 use anyhow::{anyhow, Result};
 
 pub struct Cmd {}
 
 impl Cmd {
-    pub fn execute(resp_val: &DataType) -> DataType {
+    pub fn execute(resp_val: &RespType) -> RespType {
         let cmd_name_and_args = Cmd::extract_command_name_and_args(resp_val);
         let (cmd_name, args) = match cmd_name_and_args {
             Ok(cmd) => {
                 (cmd.0, cmd.1)
             }
             Err(e) => {
-                return DataType::SimpleError(format!("(error) {:?}", e))
+                return RespType::SimpleError(format!("(error) {:?}", e))
             }
         };
-        let args = args.iter().map(|a| a).collect::<Vec<&DataType>>();
+        let args = args.iter().map(|a| a).collect::<Vec<&RespType>>();
         let args = args.as_slice();
 
         match cmd_name.to_uppercase().as_str() {
@@ -27,14 +27,14 @@ impl Cmd {
                 echo::Echo{}.execute(args)
             },
             _ => {
-                DataType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name))
+                RespType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name))
             }
         }
     }
 
-    fn extract_command_name_and_args(resp_val: &DataType) -> Result<(String, Vec<DataType>)> {
+    fn extract_command_name_and_args(resp_val: &RespType) -> Result<(String, Vec<RespType>)> {
         let resp_arr = match resp_val {
-            DataType::Array(arr) => {
+            RespType::Array(arr) => {
                 arr
             }
             _ => {
@@ -48,7 +48,7 @@ impl Cmd {
 
         let cmd_name = resp_arr.first().unwrap();
         let cmd_name = match cmd_name {
-            DataType::BulkString(name) => {
+            RespType::BulkString(name) => {
                 name
             }
             _ => {
@@ -56,7 +56,7 @@ impl Cmd {
             }
         };
 
-        let args = resp_arr.into_iter().skip(1).map(|arg| arg.clone()).collect::<Vec<DataType>>();
+        let args = resp_arr.into_iter().skip(1).map(|arg| arg.clone()).collect::<Vec<RespType>>();
 
         Ok((cmd_name.into(), args))
     }
