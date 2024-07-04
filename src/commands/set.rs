@@ -4,11 +4,11 @@ use crate::protocol::resp::types::RespType::{BulkString, SimpleError};
 use crate::storage::store::Store;
 
 pub struct Set<'a> {
-    store: &'a mut Store
+    store: &'a Store
 }
 
 impl<'a> Set<'a> {
-    pub fn new(store: &mut Store) -> Set {
+    pub fn new(store: &Store) -> Set {
         Set {
             store
         }
@@ -41,7 +41,7 @@ impl<'a> CommandExecutor for Set<'a> {
             }
         };
 
-        self.store.put(key.into(), val.into());
+        self.store.put(key.clone(), val.clone());
 
         BulkString("OK".into())
     }

@@ -10,7 +10,7 @@ impl Store {
         SimpleMap(SimpleHashMap::new())
     }
 
-    pub fn put(&mut self, k: String, v: String) {
+    pub fn put(&self, k: String, v: String) {
         match self {
             SimpleMap(mem) => {
                 mem.put(k, v)
@@ -18,7 +18,7 @@ impl Store {
         }
     }
 
-    pub fn get(&self, k: &str) -> Option<&str> {
+    pub fn get(&self, k: &str) -> Option<String> {
         match self {
             SimpleMap(mem) => {
                 mem.get(k)

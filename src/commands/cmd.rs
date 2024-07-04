@@ -1,5 +1,5 @@
 use crate::commands::traits::CommandExecutor;
-use crate::commands::{echo, ping, set};
+use crate::commands::{echo, ping, set, get, info};
 use crate::protocol::resp::types::RespType;
 use anyhow::{anyhow, Result};
 use crate::storage::store::Store;
@@ -7,7 +7,7 @@ use crate::storage::store::Store;
 pub struct Cmd {}
 
 impl Cmd {
-    pub fn execute(resp_val: &RespType, store: &mut Store) -> RespType {
+    pub fn execute(resp_val: &RespType, store: &Store) -> RespType {
         let cmd_name_and_args = Cmd::extract_command_name_and_args(resp_val);
         let (cmd_name, args) = match cmd_name_and_args {
             Ok(cmd) => {
@@ -21,15 +21,21 @@ impl Cmd {
         let args = args.as_slice();
 
         match cmd_name.to_uppercase().as_str() {
-            "PING" => {
-                ping::Ping{}.execute(args)
-            },
             "ECHO" => {
                 echo::Echo{}.execute(args)
             },
+            "GET" => {
+                get::Get::new(store).execute(args)
+            },
+            "INFO" => {
+                info::Info{}.execute(args)
+            }
+            "PING" => {
+                ping::Ping{}.execute(args)
+            },
             "SET" => {
                 set::Set::new(store).execute(args)
-            }
+            },
             _ => {
                 RespType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name))
             }

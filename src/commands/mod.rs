@@ -4,3 +4,4 @@ mod ping;
 mod echo;
 mod set;
 mod get;
+mod info;

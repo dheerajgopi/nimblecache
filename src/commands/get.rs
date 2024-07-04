@@ -1,14 +1,14 @@
 use crate::commands::traits::CommandExecutor;
 use crate::protocol::resp::types::RespType;
-use crate::protocol::resp::types::RespType::{NullBulkString, SimpleError, BulkString};
+use crate::protocol::resp::types::RespType::{SimpleError, BulkString};
 use crate::storage::store::Store;
 
 pub struct Get<'a> {
-    store: &'a mut Store
+    store: &'a Store
 }
 
 impl<'a> Get<'a> {
-    pub fn new(store: &mut Store) -> Get {
+    pub fn new(store: &Store) -> Get {
         Get {
             store
         }
@@ -33,9 +33,9 @@ impl<'a> CommandExecutor for Get<'a> {
 
         let val = self.store.get(key);
         if val.is_none() {
-            return NullBulkString
+            return RespType::null_bulk_string()
         }
 
-        BulkString(val.unwrap().into())
+        BulkString(val.unwrap())
     }
 }

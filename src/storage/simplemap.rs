@@ -1,27 +1,29 @@
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 pub struct SimpleHashMap {
-    mem: HashMap<String, String>
+    mem: Mutex<HashMap<String, String>>
 }
 
 impl SimpleHashMap {
     pub fn new() -> SimpleHashMap {
         SimpleHashMap {
-            mem: HashMap::new()
+            mem: Mutex::new(HashMap::new())
         }
     }
 
-    pub fn put(&mut self, k: String, v: String) {
-        self.mem.insert(k, v);
+    pub fn put(&self, k: String, v: String) {
+        self.mem.lock().unwrap().insert(k, v);
+        // self.mem.insert(k, v);
     }
 
-    pub fn get(& self, k: &str) -> Option<&str> {
-        match self.mem.get(k) {
+    pub fn get(&self, k: &str) -> Option<String> {
+        match self.mem.lock().unwrap().get(k) {
             None => {
                 None
             }
             Some(v) => {
-                Some(v.as_str())
+                Some(v.clone())
             }
         }
     }

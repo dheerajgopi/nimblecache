@@ -2,6 +2,7 @@ mod protocol;
 mod commands;
 mod storage;
 
+use std::sync::Arc;
 use tokio::net::TcpListener;
 use anyhow::Result;
 use crate::commands::cmd::Cmd;
@@ -15,10 +16,12 @@ async fn main() {
     println!("Starting TCP listener on port 6379");
 
     let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
-    let storage = &mut Store::new_simple_map();
+    let storage = Store::new_simple_map();
+    let storage_arc = Arc::new(storage);
 
     loop {
         let stream = listener.accept().await;
+        let storage_arc = Arc::clone(&storage_arc);
 
         match stream {
             Ok((mut stream, _)) => {
@@ -43,7 +46,7 @@ async fn main() {
                                 panic!("Error reading the RESP command")
                             }
                         };
-                        let res = Cmd::execute(&resp_command, storage);
+                        let res = Cmd::execute(&resp_command, Arc::as_ref(&storage_arc));
 
                         resp_handler.write(&res).await.unwrap();
                     }
