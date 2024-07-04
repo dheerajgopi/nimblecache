@@ -1,16 +1,35 @@
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
 
+/// Nimblecache supports Redis Serialization Protocol or RESP.
+/// This enum is a wrapper for the different RESP types.
+/// Please refer <https://redis.io/docs/latest/develop/reference/protocol-spec/> for more info
+/// on the RESP protocol.
 #[derive(Clone, Debug)]
 pub enum RespType {
+    /// Refer <https://redis.io/docs/latest/develop/reference/protocol-spec/#simple-strings>
     SimpleString(String),
+    /// Refer <https://redis.io/docs/latest/develop/reference/protocol-spec/#bulk-strings>
     BulkString(String),
+    /// Null representation in RESP2. It's simply a BulkString with length of negative one (-1).
     NullBulkString,
+    /// Refer <https://redis.io/docs/latest/develop/reference/protocol-spec/#arrays>
     Array(Vec<RespType>),
+    /// Refer <https://redis.io/docs/latest/develop/reference/protocol-spec/#simple-errors>
     SimpleError(String),
 }
 
 impl RespType {
+    /// Parse the given bytes into its respective RESP type and return the parsed RESP value and
+    /// the number of bytes read from the buffer.
+    ///
+    /// More details on the parsing logic is available at
+    /// <https://redis.io/docs/latest/develop/reference/protocol-spec/#resp-protocol-description>.
+    ///
+    /// # Errors
+    /// Error will be returned in the following scenarios:
+    /// - If first byte is an invalid character.
+    /// - If the parsing fails due to encoding issues etc.
     pub fn parse(buffer: BytesMut) -> Result<(RespType, usize)> {
         let c = buffer[0] as char;
         return match c {
@@ -22,6 +41,23 @@ impl RespType {
         };
     }
 
+    /// Parse the given bytes into a SimpleString RESP value. This will return the parsed RESP
+    /// value and the number of bytes read from the buffer.
+    ///
+    /// Example SimpleString: `+OK\r\n`
+    ///
+    /// # SimpleString Parts:
+    /// ```
+    ///      +      |      OK      | \r\n
+    ///  identifier | string value | CRLF
+    /// ```
+    ///
+    /// # Parsing Logic:
+    /// The buffer is read until CRLF characters ("\r\n") are encountered. That slice of bytes are then
+    /// parsed into an UTF-8 string.
+    ///
+    /// Note: The first byte in the buffer is skipped since it's just an identifier for the
+    /// RESP type and is not the part of the actual value itself.
     pub fn new_simple_string(buffer: BytesMut) -> Result<(RespType, usize)> {
         if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
             let utf8_str = String::from_utf8(buf_data.to_vec());
@@ -35,6 +71,25 @@ impl RespType {
         return Err(anyhow!("Invalid value for simple string {:?}", buffer));
     }
 
+    /// Parse the given bytes into a BulkString RESP value. This will return the parsed RESP
+    /// value and the number of bytes read from the buffer.
+    ///
+    /// Example BulkString: `$5\r\nhello\r\n`
+    ///
+    /// # BulkString Parts:
+    /// ```
+    ///     $      |            5           | \r\n |    hello     | \r\n
+    /// identifier | string length in bytes | CRLF | string value | CRLF
+    /// ```
+    ///
+    /// # Parsing Logic:
+    /// - The buffer is read until CRLF characters ("\r\n") are encountered.
+    /// - That slice of bytes are then parsed into an int. That will be the string length in bytes (let's say `bulk_str_len`)
+    /// - `bulk_str_len` number of bytes are read from the buffer again from where it was stopped previously.
+    /// - This 2nd slice of bytes is then parsed into an UTF-8 string.
+    ///
+    /// Note: The first byte in the buffer is skipped since it's just an identifier for the
+    /// RESP type and is not the part of the actual value itself.
     pub fn new_bulk_string(buffer: BytesMut) -> Result<(RespType, usize)> {
         let (bulk_str_len, bytes_consumed) =
             if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
@@ -53,10 +108,31 @@ impl RespType {
         }
     }
 
+    /// Return a null BulkString, which is basically a BulkString with length -1.
     pub fn null_bulk_string() -> RespType {
         RespType::NullBulkString
     }
 
+    /// Parse the given bytes into an Array RESP value. This will return the parsed RESP
+    /// value and the number of bytes read from the buffer.
+    ///
+    /// Example Array: `*2\r\n$3\r\nSan\r\n$9\r\Francisco\r\n`
+    ///
+    /// The above array is of length 2, and contains 2 BulkStrings.
+    ///
+    /// # Array Parts:
+    /// ```
+    ///     *      |      2       | \r\n |      $3\r\nSan\r\n      |    $9\r\Francisco\r\n
+    /// identifier | array length | CRLF | first item in the array | second item in the array
+    /// ```
+    ///
+    /// # Parsing Logic:
+    /// - The buffer is read until CRLF characters ("\r\n") are encountered.
+    /// - That slice of bytes are then parsed into an int. That will be the array length (let's say `arr_len`)
+    /// - [Self::parse] is called `arr_len` number of times on the remaining bytes of the buffer to parse each array item.
+    ///
+    /// Note: The first byte in the buffer is skipped since it's just an identifier for the
+    /// RESP type and is not the part of the actual value itself.
     pub fn new_array(buffer: BytesMut) -> Result<(RespType, usize)> {
         let (arr_len, mut bytes_consumed) =
             if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
@@ -81,6 +157,19 @@ impl RespType {
         return Ok((RespType::Array(items), bytes_consumed));
     }
 
+    /// Parse the given bytes into a SimpleError RESP value. This will return the parsed RESP
+    /// value and the number of bytes read from the buffer.
+    ///
+    /// Example SimpleString: `-Error message\r\n`
+    ///
+    /// # SimpleError Parts:
+    /// ```
+    ///      -      |      Error message      | \r\n
+    ///  identifier | error message as string | CRLF
+    /// ```
+    ///
+    /// # Parsing Logic:
+    /// Parsing logic is same as [RespType::SimpleString].
     pub fn new_simple_error(buffer: BytesMut) -> Result<(RespType, usize)> {
         if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
             let utf8_str = String::from_utf8(buf_data.to_vec());
@@ -94,6 +183,7 @@ impl RespType {
         return Err(anyhow!("Invalid value for simple error {:?}", buffer));
     }
 
+    /// Serialize the RESP value into its string value.
     pub fn serialize(&self) -> String {
         return match self {
             RespType::SimpleString(ss) => format!("+{}\r\n", ss),
@@ -114,7 +204,7 @@ impl RespType {
         };
     }
 
-    // Read the bytes till reaching "\r\n"
+    // Read the bytes till reaching CRLF ("\r\n")
     fn read_till_clrf(buf: &[u8]) -> Option<(&[u8], usize)> {
         for i in 1..buf.len() {
             if buf[i - 1] == b'\r' && buf[i] == b'\n' {

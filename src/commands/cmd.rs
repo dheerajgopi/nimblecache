@@ -4,9 +4,18 @@ use crate::protocol::resp::types::RespType;
 use crate::storage::store::Store;
 use anyhow::{anyhow, Result};
 
+/// Unit struct used for executing various Nimblecache commands.
 pub struct Cmd {}
 
 impl Cmd {
+    /// Extract the command and its arguments from the given RESP value, and execute the same.
+    ///
+    /// # Validations
+    /// A command should always be in Array (of BulkStrings) RESP format. The first item should be the command name,
+    /// and the rest of the items will be the arguments to the command.
+    ///
+    /// # Errors
+    /// The validation errors are returned as SimpleError RESP type.
     pub fn execute(resp_val: &RespType, store: &Store) -> RespType {
         let cmd_name_and_args = Cmd::extract_command_name_and_args(resp_val);
         let (cmd_name, args) = match cmd_name_and_args {

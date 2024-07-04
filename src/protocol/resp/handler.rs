@@ -5,12 +5,15 @@ use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
+/// RespHandler can read RESP values from a TcpStream and write RESP values into the same TcpStream.
 pub struct RespHandler<'a> {
     stream: &'a mut TcpStream,
     buffer: BytesMut,
 }
 
 impl<'a> RespHandler<'a> {
+    /// Creates a new RespHandler using the given TcpStream. The internal buffer capacity can
+    /// also be specified using `buffer_cap` argument.
     pub fn new(stream: &'a mut TcpStream, buffer_cap: usize) -> Self {
         RespHandler {
             stream,
@@ -20,7 +23,7 @@ impl<'a> RespHandler<'a> {
 }
 
 impl<'a> RespReader for RespHandler<'a> {
-    // Parse the RESP data type from the TCP stream.
+    /// Parse the RESP value from the TcpStream.
     async fn read(&mut self) -> anyhow::Result<Option<RespType>> {
         let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
 
@@ -38,6 +41,7 @@ impl<'a> RespReader for RespHandler<'a> {
 }
 
 impl<'a> RespWriter for RespHandler<'a> {
+    /// Write the RESP value into the TcpStream and return the number of bytes written.
     async fn write(&mut self, resp_data: &RespType) -> anyhow::Result<usize> {
         let write_data = self.stream.write(resp_data.serialize().as_bytes()).await;
         let bytes_written = match write_data {
