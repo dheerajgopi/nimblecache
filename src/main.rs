@@ -1,15 +1,15 @@
-mod protocol;
 mod commands;
+mod protocol;
 mod storage;
 
-use std::sync::Arc;
-use tokio::net::TcpListener;
-use anyhow::Result;
 use crate::commands::cmd::Cmd;
-use crate::protocol::resp::resp2::Resp2Handler;
+use crate::protocol::resp::handler::RespHandler;
 use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
 use crate::storage::store::Store;
+use anyhow::Result;
+use std::sync::Arc;
+use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
@@ -25,23 +25,20 @@ async fn main() {
 
         match stream {
             Ok((mut stream, _)) => {
-                println!("accepted new connection from: {:?}", stream.peer_addr().unwrap());
+                println!(
+                    "accepted new connection from: {:?}",
+                    stream.peer_addr().unwrap()
+                );
 
                 tokio::spawn(async move {
-                    let mut resp_handler = Resp2Handler::new(&mut stream, 512);
+                    let mut resp_handler = RespHandler::new(&mut stream, 512);
                     loop {
                         let resp_command: Result<Option<RespType>> = resp_handler.read().await;
                         let resp_command = match resp_command {
-                            Ok(cmd) => {
-                                match cmd {
-                                    None => {
-                                        break
-                                    }
-                                    Some(cmd) => {
-                                        cmd
-                                    }
-                                }
-                            }
+                            Ok(cmd) => match cmd {
+                                None => break,
+                                Some(cmd) => cmd,
+                            },
                             Err(_) => {
                                 panic!("Error reading the RESP command")
                             }
