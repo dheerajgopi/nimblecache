@@ -59,7 +59,7 @@ impl RespType {
     /// Note: The first byte in the buffer is skipped since it's just an identifier for the
     /// RESP type and is not the part of the actual value itself.
     pub fn new_simple_string(buffer: BytesMut) -> Result<(RespType, usize)> {
-        if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
+        if let Some((buf_data, len)) = Self::read_till_crlf(&buffer[1..]) {
             let utf8_str = String::from_utf8(buf_data.to_vec());
 
             return match utf8_str {
@@ -92,7 +92,7 @@ impl RespType {
     /// RESP type and is not the part of the actual value itself.
     pub fn new_bulk_string(buffer: BytesMut) -> Result<(RespType, usize)> {
         let (bulk_str_len, bytes_consumed) =
-            if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
+            if let Some((buf_data, len)) = Self::read_till_crlf(&buffer[1..]) {
                 let bulk_str_len = Self::parse_int_from_buf(buf_data)?;
                 (bulk_str_len, len + 1)
             } else {
@@ -135,7 +135,7 @@ impl RespType {
     /// RESP type and is not the part of the actual value itself.
     pub fn new_array(buffer: BytesMut) -> Result<(RespType, usize)> {
         let (arr_len, mut bytes_consumed) =
-            if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
+            if let Some((buf_data, len)) = Self::read_till_crlf(&buffer[1..]) {
                 let arr_len = Self::parse_int_from_buf(buf_data)?;
                 (arr_len, len + 1)
             } else {
@@ -171,7 +171,7 @@ impl RespType {
     /// # Parsing Logic:
     /// Parsing logic is same as [RespType::SimpleString].
     pub fn new_simple_error(buffer: BytesMut) -> Result<(RespType, usize)> {
-        if let Some((buf_data, len)) = Self::read_till_clrf(&buffer[1..]) {
+        if let Some((buf_data, len)) = Self::read_till_crlf(&buffer[1..]) {
             let utf8_str = String::from_utf8(buf_data.to_vec());
 
             return match utf8_str {
@@ -205,7 +205,7 @@ impl RespType {
     }
 
     // Read the bytes till reaching CRLF ("\r\n")
-    fn read_till_clrf(buf: &[u8]) -> Option<(&[u8], usize)> {
+    fn read_till_crlf(buf: &[u8]) -> Option<(&[u8], usize)> {
         for i in 1..buf.len() {
             if buf[i - 1] == b'\r' && buf[i] == b'\n' {
                 return Some((&buf[0..(i - 1)], i + 1));
