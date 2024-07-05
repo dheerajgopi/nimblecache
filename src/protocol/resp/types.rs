@@ -101,7 +101,10 @@ impl RespType {
 
         let bulk_str_end_idx = bytes_consumed + bulk_str_len as usize;
         if bulk_str_end_idx >= buffer.len() {
-            return Err(anyhow!("Improper bulk string length provided in {:?}", buffer));
+            return Err(anyhow!(
+                "Improper bulk string length provided in {:?}",
+                buffer
+            ));
         }
         let bulk_str = String::from_utf8(buffer[bytes_consumed..bulk_str_end_idx].to_vec());
 
