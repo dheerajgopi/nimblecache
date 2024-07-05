@@ -100,6 +100,9 @@ impl RespType {
             };
 
         let bulk_str_end_idx = bytes_consumed + bulk_str_len as usize;
+        if bulk_str_end_idx >= buffer.len() {
+            return Err(anyhow!("Improper bulk string length provided in {:?}", buffer));
+        }
         let bulk_str = String::from_utf8(buffer[bytes_consumed..bulk_str_end_idx].to_vec());
 
         match bulk_str {
@@ -116,13 +119,13 @@ impl RespType {
     /// Parse the given bytes into an Array RESP value. This will return the parsed RESP
     /// value and the number of bytes read from the buffer.
     ///
-    /// Example Array: `*2\r\n$3\r\nSan\r\n$9\r\Francisco\r\n`
+    /// Example Array: `*2\r\n$3\r\nSan\r\n$9\r\nFrancisco\r\n`
     ///
     /// The above array is of length 2, and contains 2 BulkStrings.
     ///
     /// # Array Parts:
     /// ```
-    ///     *      |      2       | \r\n |      $3\r\nSan\r\n      |    $9\r\Francisco\r\n
+    ///     *      |      2       | \r\n |      $3\r\nSan\r\n      |    $9\r\nFrancisco\r\n
     /// identifier | array length | CRLF | first item in the array | second item in the array
     /// ```
     ///
@@ -144,6 +147,9 @@ impl RespType {
 
         let mut items: Vec<RespType> = vec![];
         for _ in 0..arr_len {
+            if bytes_consumed >= buffer.len() {
+                return Err(anyhow!("Improper array length provided in {:?}", buffer));
+            }
             let item = Self::parse(BytesMut::from(&buffer[bytes_consumed..]));
             match item {
                 Ok((data, bytes_read)) => {
