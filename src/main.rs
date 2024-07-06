@@ -1,21 +1,32 @@
+mod cli;
 mod commands;
 mod protocol;
 mod storage;
 
+use crate::cli::args::Args;
 use crate::commands::cmd::Cmd;
 use crate::protocol::resp::handler::RespHandler;
 use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
 use crate::storage::store::Store;
 use anyhow::Result;
+use clap::Parser;
+use env_logger;
+use log::{error, info};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
-    println!("Starting TCP listener on port 6379");
+    let cli_args = Args::parse();
 
-    let listener = TcpListener::bind("127.0.0.1:6379").await.unwrap();
+    // init logger
+    env_logger::init();
+
+    let addr = format!("127.0.0.1:{}", cli_args.port);
+    info!("Starting TCP listener on port {}", cli_args.port);
+
+    let listener = TcpListener::bind(addr).await.unwrap();
     let storage = Store::new_simple_map();
     let storage_arc = Arc::new(storage);
 
@@ -25,7 +36,7 @@ async fn main() {
 
         match stream {
             Ok((mut stream, _)) => {
-                println!(
+                info!(
                     "accepted new connection from: {:?}",
                     stream.peer_addr().unwrap()
                 );
@@ -50,7 +61,7 @@ async fn main() {
                 });
             }
             Err(e) => {
-                println!("error: {}", e);
+                error!("error: {}", e);
             }
         }
     }

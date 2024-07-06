@@ -1,5 +1,5 @@
 run-dev:
-	cargo run
+	RUST_LOG=debug cargo run
 
 run-tests:
 	cargo test
