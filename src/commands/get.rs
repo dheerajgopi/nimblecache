@@ -40,11 +40,16 @@ impl<'a> CommandExecutor for Get<'a> {
             _ => return SimpleError("ERR Invalid argument. Key must be a bulk string".into()),
         };
 
-        let val = self.store.get(key);
-        if val.is_none() {
+        let value = self.store.get(key);
+        if value.is_none() {
             return RespType::null_bulk_string();
         }
 
-        BulkString(val.unwrap().val().to_string())
+        let value = value.unwrap();
+        if value.has_expired() {
+            return RespType::null_bulk_string();
+        }
+
+        BulkString(value.val().to_string())
     }
 }
