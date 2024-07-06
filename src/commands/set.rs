@@ -2,6 +2,7 @@ use crate::commands::traits::CommandExecutor;
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::{BulkString, SimpleError};
 use crate::storage::store::Store;
+use crate::storage::value::StringValue;
 
 /// Struct for the SET command.
 /// It holds the pointer to the backing data store.
@@ -48,7 +49,8 @@ impl<'a> CommandExecutor for Set<'a> {
             _ => return SimpleError("ERR Invalid argument. Value must be a bulk string".into()),
         };
 
-        self.store.put(key.clone(), val.clone());
+        self.store
+            .put(key.clone(), StringValue::new(val.clone(), None));
 
         BulkString("OK".into())
     }

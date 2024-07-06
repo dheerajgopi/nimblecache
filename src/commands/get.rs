@@ -45,6 +45,6 @@ impl<'a> CommandExecutor for Get<'a> {
             return RespType::null_bulk_string();
         }
 
-        BulkString(val.unwrap())
+        BulkString(val.unwrap().val().to_string())
     }
 }
