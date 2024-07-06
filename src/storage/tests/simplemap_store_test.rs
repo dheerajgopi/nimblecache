@@ -1,15 +1,16 @@
 use crate::storage::store::Store;
+use crate::storage::value::StringValue;
 
 #[test]
 fn test_simplemap_for_key_with_some_value() {
     let store = Store::new_simple_map();
     let k = "a";
     let v = "b";
-    store.put(k.into(), v.into());
+    store.put(k.into(), StringValue::new(v.into(), None));
 
     let fetched_val = store.get(k);
     assert_eq!(true, fetched_val.is_some());
-    assert_eq!(v, fetched_val.unwrap());
+    assert_eq!(v, fetched_val.unwrap().val());
 }
 
 #[test]
@@ -24,11 +25,11 @@ fn test_simplemap_for_key_with_updated_value() {
     let store = Store::new_simple_map();
     let k = "a";
     let v = "b";
-    store.put(k.into(), v.into());
+    store.put(k.into(), StringValue::new(v.into(), None));
     let updated_v = "c";
-    store.put(k.into(), updated_v.into());
+    store.put(k.into(), StringValue::new(updated_v.into(), None));
 
     let fetched_val = store.get(k);
     assert_eq!(true, fetched_val.is_some());
-    assert_eq!(updated_v, fetched_val.unwrap());
+    assert_eq!(updated_v, fetched_val.unwrap().val());
 }

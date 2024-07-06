@@ -140,3 +140,10 @@ fn test_simple_error_creation_with_no_crlf() {
 
     assert_eq!(true, se.is_err());
 }
+
+#[test]
+fn test_valid_null_bulk_string_creation() {
+    let s = "$-1\r\n";
+    let nbs = RespType::null_bulk_string();
+    assert_eq!(s, nbs.serialize());
+}

@@ -197,7 +197,7 @@ impl RespType {
         return match self {
             RespType::SimpleString(ss) => format!("+{}\r\n", ss),
             RespType::BulkString(bs) => format!("${}\r\n{}\r\n", bs.chars().count(), bs),
-            RespType::NullBulkString => "-1\r\n".into(),
+            RespType::NullBulkString => "$-1\r\n".into(),
             RespType::Array(arr) => {
                 let mut ser_array = String::from(format!("*{}\r\n", arr.len()));
                 ser_array.push_str(
