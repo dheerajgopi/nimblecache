@@ -1,6 +1,7 @@
 use crate::commands::traits::CommandExecutor;
 use crate::commands::{echo, get, info, ping, set};
 use crate::protocol::resp::types::RespType;
+use crate::server::info::ServerInfo;
 use crate::storage::store::Store;
 use anyhow::{anyhow, Result};
 
@@ -16,7 +17,7 @@ impl Cmd {
     ///
     /// # Errors
     /// The validation errors are returned as SimpleError RESP type.
-    pub fn execute(resp_val: &RespType, store: &Store) -> RespType {
+    pub fn execute(resp_val: &RespType, store: &Store, server_info: &ServerInfo) -> RespType {
         let cmd_name_and_args = Cmd::extract_command_name_and_args(resp_val);
         let (cmd_name, args) = match cmd_name_and_args {
             Ok(cmd) => (cmd.0, cmd.1),
@@ -28,7 +29,7 @@ impl Cmd {
         match cmd_name.to_uppercase().as_str() {
             "ECHO" => echo::Echo {}.execute(args),
             "GET" => get::Get::new(store).execute(args),
-            "INFO" => info::Info {}.execute(args),
+            "INFO" => info::Info::new(server_info).execute(args),
             "PING" => ping::Ping {}.execute(args),
             "SET" => set::Set::new(store).execute(args),
             _ => RespType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name)),

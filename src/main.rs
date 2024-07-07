@@ -1,6 +1,7 @@
 mod cli;
 mod commands;
 mod protocol;
+mod server;
 mod storage;
 
 use crate::cli::args::Args;
@@ -8,6 +9,7 @@ use crate::commands::cmd::Cmd;
 use crate::protocol::resp::handler::RespHandler;
 use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
+use crate::server::info::{Role, ServerInfo};
 use crate::storage::store::Store;
 use anyhow::Result;
 use clap::Parser;
@@ -23,6 +25,11 @@ async fn main() {
     // init logger
     env_logger::init();
 
+    // Assume master/slave
+    let server_info = ServerInfo::new(Role::from_str(cli_args.replica_of.as_str()));
+    info!("Assuming role as {}", server_info.role);
+    let server_info_arc = Arc::new(server_info);
+
     let addr = format!("127.0.0.1:{}", cli_args.port);
     info!("Starting TCP listener on port {}", cli_args.port);
 
@@ -33,6 +40,7 @@ async fn main() {
     loop {
         let stream = listener.accept().await;
         let storage_arc = Arc::clone(&storage_arc);
+        let server_info_arc = Arc::clone(&server_info_arc);
 
         match stream {
             Ok((mut stream, _)) => {
@@ -54,7 +62,11 @@ async fn main() {
                                 panic!("Error reading the RESP command")
                             }
                         };
-                        let res = Cmd::execute(&resp_command, Arc::as_ref(&storage_arc));
+                        let res = Cmd::execute(
+                            &resp_command,
+                            Arc::as_ref(&storage_arc),
+                            Arc::as_ref(&server_info_arc),
+                        );
 
                         resp_handler.write(&res).await.unwrap();
                     }

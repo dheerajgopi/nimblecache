@@ -1,15 +1,25 @@
-use crate::commands::traits::CommandExecutor;
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::SimpleError;
+use crate::{commands::traits::CommandExecutor, server::info::ServerInfo};
 
 use anyhow::{anyhow, Result};
 
 const ALL_INFO_ARGS: [InfoArg; 1] = [InfoArg::REPLICATION];
 
 /// Struct for the INFO command.
-pub struct Info {}
+pub struct Info<'a> {
+    /// Used to fetch server info
+    server: &'a ServerInfo,
+}
 
-impl CommandExecutor for Info {
+impl<'a> Info<'a> {
+    /// Create new Info command struct
+    pub fn new(server: &ServerInfo) -> Info {
+        Info { server: server }
+    }
+}
+
+impl<'a> CommandExecutor for Info<'a> {
     /// Returns the server info in BulkString format.
     /// Specific sections of info can be selected by specifying optional parameters.
     /// If no optional parameters are specified, all sections are returned.
@@ -39,10 +49,10 @@ impl CommandExecutor for Info {
 
         for info_arg in info_args {
             let section = match info_arg {
-                InfoArg::REPLICATION => "# Replication\nrole:master\n",
+                InfoArg::REPLICATION => format!("# Replication\n{}\n", self.server.role.info_str()),
             };
 
-            info.push_str(section)
+            info.push_str(section.as_str())
         }
 
         return RespType::BulkString(info);
