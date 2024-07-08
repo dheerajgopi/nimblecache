@@ -1,5 +1,6 @@
 use clap::Parser;
 
+/// Arguments to be passed while starting Nimblecache server.
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 pub struct Args {

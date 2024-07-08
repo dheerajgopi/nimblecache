@@ -1,10 +1,10 @@
 run-dev:
 	RUST_LOG=debug cargo run
 
-run-tests:
+tests:
 	cargo test
 
-run-fmt:
+fmt:
 	cargo fmt
 
 build-dev:

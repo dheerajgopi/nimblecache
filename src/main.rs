@@ -5,18 +5,9 @@ mod server;
 mod storage;
 
 use crate::cli::args::Args;
-use crate::commands::cmd::Cmd;
-use crate::protocol::resp::handler::RespHandler;
-use crate::protocol::resp::traits::{RespReader, RespWriter};
-use crate::protocol::resp::types::RespType;
-use crate::server::info::{Role, ServerInfo};
-use crate::storage::store::Store;
-use anyhow::Result;
+use crate::server::srv::TcpServer;
 use clap::Parser;
 use env_logger;
-use log::{error, info};
-use std::sync::Arc;
-use tokio::net::TcpListener;
 
 #[tokio::main]
 async fn main() {
@@ -25,56 +16,7 @@ async fn main() {
     // init logger
     env_logger::init();
 
-    // Assume master/slave
-    let server_info = ServerInfo::new(Role::from_str(cli_args.replica_of.as_str()));
-    info!("Assuming role as {}", server_info.role);
-    let server_info_arc = Arc::new(server_info);
-
-    let addr = format!("127.0.0.1:{}", cli_args.port);
-    info!("Starting TCP listener on port {}", cli_args.port);
-
-    let listener = TcpListener::bind(addr).await.unwrap();
-    let storage = Store::new_simple_map();
-    let storage_arc = Arc::new(storage);
-
-    loop {
-        let stream = listener.accept().await;
-        let storage_arc = Arc::clone(&storage_arc);
-        let server_info_arc = Arc::clone(&server_info_arc);
-
-        match stream {
-            Ok((mut stream, _)) => {
-                info!(
-                    "accepted new connection from: {:?}",
-                    stream.peer_addr().unwrap()
-                );
-
-                tokio::spawn(async move {
-                    let mut resp_handler = RespHandler::new(&mut stream, 512);
-                    loop {
-                        let resp_command: Result<Option<RespType>> = resp_handler.read().await;
-                        let resp_command = match resp_command {
-                            Ok(cmd) => match cmd {
-                                None => break,
-                                Some(cmd) => cmd,
-                            },
-                            Err(_) => {
-                                panic!("Error reading the RESP command")
-                            }
-                        };
-                        let res = Cmd::execute(
-                            &resp_command,
-                            Arc::as_ref(&storage_arc),
-                            Arc::as_ref(&server_info_arc),
-                        );
-
-                        resp_handler.write(&res).await.unwrap();
-                    }
-                });
-            }
-            Err(e) => {
-                error!("error: {}", e);
-            }
-        }
-    }
+    // init server and start listening to the specified port
+    let srv = TcpServer::new(&cli_args);
+    srv.start().await;
 }
