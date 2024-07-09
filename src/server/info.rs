@@ -1,3 +1,4 @@
+use anyhow::{anyhow, Result};
 use core::fmt;
 use rand::distributions::{Alphanumeric, DistString};
 
@@ -19,7 +20,8 @@ pub struct Master {
 }
 
 pub struct Slave {
-    replica_of: String,
+    master_host: String,
+    master_port: u16,
 }
 
 /// Role assumed by the server
@@ -31,12 +33,18 @@ pub enum Role {
 }
 
 impl Role {
-    /// Parse role based on the string value.
+    /// Parse and create the role based on the string value.
     /// Anything other than "master" (case-insensitive) will be considered as slave.
-    pub fn from_str(s: &str) -> Role {
-        match s.to_uppercase().as_str() {
-            "MASTER" => Self::as_master(),
-            _ => Self::as_slave_of(s.to_string()),
+    ///
+    /// # Errors
+    /// If `replicaof` cli arg is invalid for slave role. Correct format is `<MASTER_HOST> <MASTER_PORT>`.
+    pub fn from_str(s: &str) -> Result<Role> {
+        match s.trim().to_uppercase().as_str() {
+            "MASTER" => Ok(Self::as_master()),
+            _ => match Self::as_slave_of(s.to_string()) {
+                Ok(slave) => Ok(slave),
+                Err(e) => Err(e),
+            },
         }
     }
 
@@ -70,9 +78,47 @@ impl Role {
         })
     }
 
-    /// Create slave role.
-    fn as_slave_of(master: String) -> Role {
-        Role::SLAVE(Slave { replica_of: master })
+    /// Create slave role by parsing `replicaof` cli arg and extracting master host and port.
+    ///
+    /// # Validations
+    /// Check format of `replicaof`. Correct format is `<MASTER_HOST> <MASTER_PORT>`.
+    fn as_slave_of(master_host_and_port: String) -> Result<Role> {
+        let host_port = Self::parse_host_port(master_host_and_port);
+        match host_port {
+            Ok((h, p)) => Ok(Role::SLAVE(Slave {
+                master_host: h,
+                master_port: p,
+            })),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn parse_host_port(host_port_str: String) -> Result<(String, u16)> {
+        let mut split = host_port_str.split_whitespace();
+
+        let host = match split.next() {
+            Some(h) => h,
+            None => {
+                return Err(anyhow!("Invalid value for replicaof. replicaof should be in '<MASTER_HOST> <MASTER_PORT>' format"));
+            }
+        };
+
+        let port = match split.next() {
+            Some(p) => p,
+            None => {
+                return Err(anyhow!("Master port is not specified in replicaof"));
+            }
+        };
+
+        let port = port.parse::<u16>();
+        let port = match port {
+            Ok(p) => p,
+            Err(_) => {
+                return Err(anyhow!("Invalid value for master port in replicaof"));
+            }
+        };
+
+        Ok((host.to_string(), port))
     }
 }
 
@@ -80,7 +126,9 @@ impl fmt::Display for Role {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Role::MASTER(_) => f.write_str("master"),
-            Role::SLAVE(m) => f.write_fmt(format_args!("slave of {}", m.replica_of)),
+            Role::SLAVE(m) => {
+                f.write_fmt(format_args!("slave of {}:{}", m.master_host, m.master_port))
+            }
         }
     }
 }

@@ -25,7 +25,14 @@ impl<'a> TcpServer<'a> {
     /// If no ports are specified, it will default to port 6379.
     pub async fn start(&self) {
         // Assume master/slave role
-        let server_info = ServerInfo::new(Role::from_str(self.args.replica_of.as_str()));
+        let role = match Role::from_str(self.args.replica_of.as_str()) {
+            Ok(r) => r,
+            Err(e) => {
+                error!("error: {}", e);
+                panic!("Error while starting the server. Error: {}", e)
+            }
+        };
+        let server_info = ServerInfo::new(role);
         info!("Assuming role as {}", server_info.role);
         let server_info_arc = Arc::new(server_info);
 
