@@ -6,3 +6,7 @@ pub trait CommandExecutor {
     /// The return value should also be of RESP type.
     fn execute(&mut self, args: &[&RespType]) -> RespType;
 }
+
+pub trait CommandBuilder {
+    fn build(args: Option<&[&RespType]>) -> RespType;
+}

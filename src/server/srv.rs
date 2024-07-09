@@ -3,6 +3,7 @@ use crate::commands::cmd::Cmd;
 use crate::protocol::resp::handler::RespHandler;
 use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
+use crate::replication::replica::Replica;
 use crate::server::info::{Role, ServerInfo};
 use crate::storage::store::Store;
 use anyhow::Result;
@@ -34,6 +35,23 @@ impl<'a> TcpServer<'a> {
         };
         let server_info = ServerInfo::new(role);
         info!("Assuming role as {}", server_info.role);
+
+        // Replica server (slave) should perform handshake with master
+        match server_info.role {
+            Role::MASTER(_) => {}
+            Role::SLAVE(_) => {
+                let replica = Replica::new(&server_info);
+                match replica.handshake().await {
+                    Ok(_) => {
+                        info!("Handshake success")
+                    }
+                    Err(e) => {
+                        panic!("Error while performing handshake. Error: {}", e)
+                    }
+                };
+            }
+        }
+
         let server_info_arc = Arc::new(server_info);
 
         let addr = format!("127.0.0.1:{}", self.args.port);

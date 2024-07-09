@@ -13,15 +13,19 @@ impl ServerInfo {
     }
 }
 
-/// Wrapper for storing master replication id and offset
+/// Wrapper for storing master replication id and offset.
+/// When a replica connects to a master it uses the replication_id and offset value to
+/// check if its completely in sync with the data in master.
 pub struct Master {
-    replication_id: String,
-    replication_offset: u64,
+    /// Pseudorandom alphanumeric string with length of 40 characters.
+    pub replication_id: String,
+    /// Offset is incremented for each byte of replication stream that is sent to replicas.
+    pub replication_offset: u64,
 }
 
 pub struct Slave {
-    master_host: String,
-    master_port: u16,
+    pub master_host: String,
+    pub master_port: u16,
 }
 
 /// Role assumed by the server
