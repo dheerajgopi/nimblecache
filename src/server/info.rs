@@ -16,7 +16,7 @@ impl ServerInfo {
 /// Wrapper for storing master replication id and offset
 pub struct Master {
     replication_id: String,
-    replication_offset: u16,
+    replication_offset: u64,
 }
 
 pub struct Slave {
