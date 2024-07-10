@@ -1,4 +1,5 @@
 use crate::commands::ping::Ping;
+use crate::commands::psync::Psync;
 use crate::commands::replconf::Replconf;
 use crate::commands::traits::CommandBuilder;
 use crate::protocol::resp::handler::RespHandler;
@@ -29,6 +30,8 @@ impl<'a> Replica<'a> {
     ///
     /// Step 2: Send 2 REPLCONF commands to master - `REPLCONF listening-port <PORT>` and `REPLCONF capa psync2`,
     ///         where `<PORT>` is the port where the replica is listening.
+    ///
+    /// Step: Send PSYNC <REPLICATION_ID> <OFFSET> command to master.
     pub async fn handshake(&self) -> Result<bool> {
         // get master host and port
         let slave_info = match &self.svr_info.role {
@@ -55,6 +58,10 @@ impl<'a> Replica<'a> {
         let ping_res = self.ping_master(&mut stream).await;
         match ping_res {
             Ok(pong) => {
+                if pong.is_error() {
+                    return Err(anyhow!(pong.error_msg().unwrap()));
+                }
+
                 info!(
                     "Received response for PING during handshake: {}",
                     pong.serialize()
@@ -84,6 +91,10 @@ impl<'a> Replica<'a> {
         let replconf_res = self.replconf_master(&mut stream, replconf_args).await;
         match replconf_res {
             Ok(ok) => {
+                if ok.is_error() {
+                    return Err(anyhow!(ok.error_msg().unwrap()));
+                }
+
                 info!(
                     "Received response for 'RESPCONF listening-port' during handshake: {}",
                     ok.serialize()
@@ -110,6 +121,10 @@ impl<'a> Replica<'a> {
         let replconf_res = self.replconf_master(&mut stream, replconf_args).await;
         match replconf_res {
             Ok(ok) => {
+                if ok.is_error() {
+                    return Err(anyhow!(ok.error_msg().unwrap()));
+                }
+
                 info!(
                     "Received response for 'RESPCONF capa psync2' during handshake: {}",
                     ok.serialize()
@@ -120,9 +135,35 @@ impl<'a> Replica<'a> {
             }
         }
 
+        // flush stream
+        let flush = stream.flush().await;
+        match flush {
+            Ok(_) => {}
+            Err(_) => {}
+        }
+
+        // Try PSYNCing the master server
+        let psync_res = self.psync_master(&mut stream).await;
+        match psync_res {
+            Ok(full_resync) => {
+                if full_resync.is_error() {
+                    return Err(anyhow!(full_resync.error_msg().unwrap()));
+                }
+
+                info!(
+                    "Received response for PSYNC during handshake: {}",
+                    full_resync.serialize()
+                );
+            }
+            Err(e) => {
+                return Err(e);
+            }
+        }
+
         return Ok(true);
     }
 
+    /// Send a PING command to master and return the response.
     async fn ping_master(&self, stream: &mut TcpStream) -> Result<RespType> {
         let mut resp_handler = RespHandler::new(stream, 512);
         let req = resp_handler.write(&Ping::build(None)).await;
@@ -150,6 +191,7 @@ impl<'a> Replica<'a> {
         }
     }
 
+    /// Send a REPLCONF command to master and return the response.
     async fn replconf_master(
         &self,
         stream: &mut TcpStream,
@@ -200,6 +242,55 @@ impl<'a> Replica<'a> {
         }
     }
 
+    /// Send a PSYNC command to master and return the response.
+    async fn psync_master(&self, stream: &mut TcpStream) -> Result<RespType> {
+        let mut resp_handler = RespHandler::new(stream, 512);
+        let args = vec![
+            RespType::BulkString("?".to_string()),
+            RespType::BulkString("-1".to_string()),
+        ];
+        let req = resp_handler
+            .write(&Psync::build(Some(
+                args.iter()
+                    .map(|a| a)
+                    .collect::<Vec<&RespType>>()
+                    .as_slice(),
+            )))
+            .await;
+        match req {
+            Ok(b) => {
+                info!(
+                    "Bytes written to master server during handshake PSYNC: {}",
+                    b
+                )
+            }
+            Err(e) => {
+                return Err(anyhow!(
+                    "Failed to PSYNC with master during handshake: {}",
+                    e
+                ))
+            }
+        }
+        let res = resp_handler.read().await;
+        match res {
+            Ok(resp) => match resp {
+                None => {
+                    return Err(anyhow!(
+                        "Received null response for 'PSYNC' from master during handshake"
+                    ))
+                }
+                Some(full_resync) => Ok(full_resync),
+            },
+            Err(e) => {
+                return Err(anyhow!(
+                    "Failed to receive response for 'PSYNC' from master during handshake: {}",
+                    e
+                ))
+            }
+        }
+    }
+
+    /// Returns `true` if the RESP instance is of type SimpleString and its value is `OK`.
     fn is_ok(res: &RespType) -> bool {
         match res {
             RespType::SimpleString(s) => s == "OK",

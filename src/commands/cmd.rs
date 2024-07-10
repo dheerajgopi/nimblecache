@@ -1,5 +1,5 @@
 use crate::commands::traits::CommandExecutor;
-use crate::commands::{echo, get, info, ping, replconf, set};
+use crate::commands::{echo, get, info, ping, psync, replconf, set};
 use crate::protocol::resp::types::RespType;
 use crate::server::info::ServerInfo;
 use crate::storage::store::Store;
@@ -33,6 +33,7 @@ impl Cmd {
             "PING" => ping::Ping {}.execute(args),
             "SET" => set::Set::new(store).execute(args),
             "REPLCONF" => replconf::Replconf {}.execute(args),
+            "PSYNC" => psync::Psync::new(server_info).execute(args),
             _ => RespType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name)),
         }
     }

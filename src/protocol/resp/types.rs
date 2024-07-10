@@ -213,6 +213,22 @@ impl RespType {
         };
     }
 
+    /// Returns true if its of SimpleError type.
+    pub fn is_error(&self) -> bool {
+        match self {
+            RespType::SimpleError(_) => true,
+            _ => false,
+        }
+    }
+
+    /// Returns the error if the RESP instance is of type SimpleError.
+    pub fn error_msg(&self) -> Option<String> {
+        match self {
+            RespType::SimpleError(s) => Some(s.to_string()),
+            _ => None,
+        }
+    }
+
     // Read the bytes till reaching CRLF ("\r\n")
     fn read_till_crlf(buf: &[u8]) -> Option<(&[u8], usize)> {
         for i in 1..buf.len() {
