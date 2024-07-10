@@ -33,7 +33,7 @@ impl<'a> TcpServer<'a> {
                 panic!("Error while starting the server. Error: {}", e)
             }
         };
-        let server_info = ServerInfo::new(role);
+        let server_info = ServerInfo::new(role, self.args.port);
         info!("Assuming role as {}", server_info.role);
 
         // Replica server (slave) should perform handshake with master

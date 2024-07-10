@@ -5,11 +5,12 @@ use rand::distributions::{Alphanumeric, DistString};
 /// Struct to store server information
 pub struct ServerInfo {
     pub role: Role,
+    pub port: u16,
 }
 
 impl ServerInfo {
-    pub fn new(role: Role) -> ServerInfo {
-        ServerInfo { role }
+    pub fn new(role: Role, port: u16) -> ServerInfo {
+        ServerInfo { role, port }
     }
 }
 

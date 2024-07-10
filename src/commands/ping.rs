@@ -12,6 +12,7 @@ impl CommandExecutor for Ping {
 }
 
 impl CommandBuilder for Ping {
+    /// Returns a PING command in RESP array format.
     fn build(_: Option<&[&RespType]>) -> RespType {
         RespType::Array(vec![RespType::BulkString("PING".to_string())])
     }

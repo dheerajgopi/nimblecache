@@ -1,7 +1,8 @@
 pub mod cmd;
-mod echo;
-mod get;
-mod info;
+pub mod echo;
+pub mod get;
+pub mod info;
 pub mod ping;
-mod set;
+pub mod replconf;
+pub mod set;
 pub mod traits;
