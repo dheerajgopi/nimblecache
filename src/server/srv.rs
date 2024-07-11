@@ -86,7 +86,7 @@ impl<'a> TcpServer<'a> {
                                     panic!("Error reading the RESP command")
                                 }
                             };
-                            let res = Cmd::execute(
+                            let (res, _) = Cmd::execute(
                                 &resp_command,
                                 Arc::as_ref(&storage_arc),
                                 Arc::as_ref(&server_info_arc),

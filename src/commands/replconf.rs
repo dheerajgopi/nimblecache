@@ -1,5 +1,6 @@
 use crate::commands::traits::{CommandBuilder, CommandExecutor};
 use crate::protocol::resp::types::RespType;
+use bytes::BytesMut;
 
 /// Struct for the REPLCONF command.
 pub struct Replconf {}
@@ -7,8 +8,8 @@ pub struct Replconf {}
 impl CommandExecutor for Replconf {
     /// Returns an OK for now.
     /// TODO: Actual replication configuration
-    fn execute(&mut self, _: &[&RespType]) -> RespType {
-        return RespType::SimpleString("OK".into());
+    fn execute(&mut self, _: &[&RespType]) -> (RespType, Option<BytesMut>) {
+        return (RespType::SimpleString("OK".into()), None);
     }
 }
 

@@ -24,7 +24,8 @@ impl<'a> Replica<'a> {
         Replica { svr_info }
     }
 
-    /// Perform handshake with master server during the replica server initialization.
+    /// Perform handshake with master server during the replica server initialization, and
+    /// returns the TCP connection.
     ///
     /// Step 1: Send PING command to master
     ///
@@ -32,7 +33,7 @@ impl<'a> Replica<'a> {
     ///         where `<PORT>` is the port where the replica is listening.
     ///
     /// Step: Send PSYNC <REPLICATION_ID> <OFFSET> command to master.
-    pub async fn handshake(&self) -> Result<bool> {
+    pub async fn handshake(&self) -> Result<()> {
         // get master host and port
         let slave_info = match &self.svr_info.role {
             Role::MASTER(_) => {
@@ -160,7 +161,7 @@ impl<'a> Replica<'a> {
             }
         }
 
-        return Ok(true);
+        return Ok(());
     }
 
     /// Send a PING command to master and return the response.

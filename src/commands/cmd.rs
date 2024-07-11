@@ -4,6 +4,7 @@ use crate::protocol::resp::types::RespType;
 use crate::server::info::ServerInfo;
 use crate::storage::store::Store;
 use anyhow::{anyhow, Result};
+use bytes::BytesMut;
 
 /// Unit struct used for executing various Nimblecache commands.
 pub struct Cmd {}
@@ -17,11 +18,15 @@ impl Cmd {
     ///
     /// # Errors
     /// The validation errors are returned as SimpleError RESP type.
-    pub fn execute(resp_val: &RespType, store: &Store, server_info: &ServerInfo) -> RespType {
+    pub fn execute(
+        resp_val: &RespType,
+        store: &Store,
+        server_info: &ServerInfo,
+    ) -> (RespType, Option<BytesMut>) {
         let cmd_name_and_args = Cmd::extract_command_name_and_args(resp_val);
         let (cmd_name, args) = match cmd_name_and_args {
             Ok(cmd) => (cmd.0, cmd.1),
-            Err(e) => return RespType::SimpleError(format!("(error) {:?}", e)),
+            Err(e) => return (RespType::SimpleError(format!("(error) {:?}", e)), None),
         };
         let args = args.iter().map(|a| a).collect::<Vec<&RespType>>();
         let args = args.as_slice();
@@ -34,7 +39,10 @@ impl Cmd {
             "SET" => set::Set::new(store).execute(args),
             "REPLCONF" => replconf::Replconf {}.execute(args),
             "PSYNC" => psync::Psync::new(server_info).execute(args),
-            _ => RespType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name)),
+            _ => (
+                RespType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name)),
+                None,
+            ),
         }
     }
 

@@ -2,6 +2,7 @@ use crate::commands::traits::CommandExecutor;
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::{BulkString, SimpleError};
 use crate::storage::store::Store;
+use bytes::BytesMut;
 
 /// Struct for the GET command.
 /// It holds the pointer to the backing data store.
@@ -29,27 +30,35 @@ impl<'a> CommandExecutor for Get<'a> {
     ///
     /// # Errors
     /// The validation errors are returned as SimpleError RESP type.
-    fn execute(&mut self, args: &[&RespType]) -> RespType {
+    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
         if args.len() != 1 {
-            return SimpleError("ERR wrong number of arguments for command".into());
+            return (
+                SimpleError("ERR wrong number of arguments for command".into()),
+                None,
+            );
         }
 
         let key = args[0];
         let key = match key {
             BulkString(k) => k,
-            _ => return SimpleError("ERR Invalid argument. Key must be a bulk string".into()),
+            _ => {
+                return (
+                    SimpleError("ERR Invalid argument. Key must be a bulk string".into()),
+                    None,
+                )
+            }
         };
 
         let value = self.store.get(key);
         if value.is_none() {
-            return RespType::null_bulk_string();
+            return (RespType::null_bulk_string(), None);
         }
 
         let value = value.unwrap();
         if value.has_expired() {
-            return RespType::null_bulk_string();
+            return (RespType::null_bulk_string(), None);
         }
 
-        BulkString(value.val().to_string())
+        (BulkString(value.val().to_string()), None)
     }
 }

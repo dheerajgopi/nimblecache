@@ -1,10 +1,14 @@
 use crate::protocol::resp::types::RespType;
+use bytes::BytesMut;
 
 /// Trait for executing Nimblecache commands.
 pub trait CommandExecutor {
     /// Execute the Nimblecache command based on the input arguments provided as a RESP type.
-    /// The return value should also be of RESP type.
-    fn execute(&mut self, args: &[&RespType]) -> RespType;
+    /// The return value should be of RESP type and an optional byte array.
+    /// The RESP type is the response to the command.
+    /// The byte array will be None most of the time. It will have some value only in cases such as
+    /// PSYNC command where server has to send certain byte data just after the RESP response.
+    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>);
 }
 
 /// Trait for building Nimblecache commands which is essentially a RESP array

@@ -3,6 +3,7 @@ use crate::protocol::resp::types::RespType::SimpleError;
 use crate::{commands::traits::CommandExecutor, server::info::ServerInfo};
 
 use anyhow::{anyhow, Result};
+use bytes::BytesMut;
 
 const ALL_INFO_ARGS: [InfoArg; 1] = [InfoArg::REPLICATION];
 
@@ -26,7 +27,7 @@ impl<'a> CommandExecutor for Info<'a> {
     ///
     /// # Supported optional params
     /// - replication : Master/replica replication information.
-    fn execute(&mut self, args: &[&RespType]) -> RespType {
+    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
         let mut info_args = vec![];
 
         // get the info sections to be returned
@@ -39,7 +40,7 @@ impl<'a> CommandExecutor for Info<'a> {
                     Ok(ia) => {
                         info_args.push(ia);
                     }
-                    Err(e) => return SimpleError(format!("{}", e)),
+                    Err(e) => return (SimpleError(format!("{}", e)), None),
                 }
             }
         }
@@ -55,7 +56,7 @@ impl<'a> CommandExecutor for Info<'a> {
             info.push_str(section.as_str())
         }
 
-        return RespType::BulkString(info);
+        return (RespType::BulkString(info), None);
     }
 }
 

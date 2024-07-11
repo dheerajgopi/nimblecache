@@ -4,6 +4,7 @@ use crate::protocol::resp::types::RespType::{BulkString, SimpleError};
 use crate::storage::store::Store;
 use crate::storage::value::StringValue;
 use anyhow::{anyhow, Result};
+use bytes::BytesMut;
 
 /// Struct for the SET command.
 /// It holds the pointer to the backing data store.
@@ -36,23 +37,36 @@ impl<'a> CommandExecutor for Set<'a> {
     ///
     /// # Errors
     /// The validation errors are returned as SimpleError RESP type.
-    fn execute(&mut self, args: &[&RespType]) -> RespType {
+    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
         if args.len() < 2 {
-            return SimpleError("ERR insufficient arguments for command".into());
+            return (
+                SimpleError("ERR insufficient arguments for command".into()),
+                None,
+            );
         }
 
         // parse key
         let key = args[0];
         let key = match key {
             BulkString(k) => k,
-            _ => return SimpleError("ERR Invalid argument. Key must be a bulk string".into()),
+            _ => {
+                return (
+                    SimpleError("ERR Invalid argument. Key must be a bulk string".into()),
+                    None,
+                )
+            }
         };
 
         // parse value
         let val = args[1];
         let val = match val {
             BulkString(v) => v,
-            _ => return SimpleError("ERR Invalid argument. Value must be a bulk string".into()),
+            _ => {
+                return (
+                    SimpleError("ERR Invalid argument. Value must be a bulk string".into()),
+                    None,
+                )
+            }
         };
         let mut val = StringValue::new(val.clone(), None);
 
@@ -65,7 +79,7 @@ impl<'a> CommandExecutor for Set<'a> {
             while start_idx < option_args.len() {
                 let (opt, nxt_idx) = match SetOption::parse(&option_args, start_idx) {
                     Ok((o, nxt_idx)) => (o, nxt_idx),
-                    Err(e) => return SimpleError(format!("{}", e)),
+                    Err(e) => return (SimpleError(format!("{}", e)), None),
                 };
 
                 // set expiry
@@ -81,7 +95,7 @@ impl<'a> CommandExecutor for Set<'a> {
 
         self.store.put(key.clone(), val);
 
-        BulkString("OK".into())
+        (BulkString("OK".into()), None)
     }
 }
 

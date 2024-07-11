@@ -2,6 +2,7 @@ use crate::commands::traits::{CommandBuilder, CommandExecutor};
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::{BulkString, SimpleError, SimpleString};
 use crate::server::info::{Role, ServerInfo};
+use bytes::BytesMut;
 
 /// Struct for the PSYNC command.
 pub struct Psync<'a> {
@@ -27,16 +28,22 @@ impl<'a> CommandExecutor for Psync<'a> {
     /// Blindly return a FULLRESYNC response for now.
     /// Supports only first-time replica connection as of now.
     /// TODO: Actual replication configuration
-    fn execute(&mut self, args: &[&RespType]) -> RespType {
+    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
         let master_role = match &self.server.role {
             Role::MASTER(m) => m,
             Role::SLAVE(_) => {
-                return SimpleError("PSYNC cannot be performed by a slave server".into())
+                return (
+                    SimpleError("PSYNC cannot be performed by a slave server".into()),
+                    None,
+                )
             }
         };
 
         if args.len() < 2 {
-            return SimpleError("ERR insufficient arguments for command".into());
+            return (
+                SimpleError("ERR insufficient arguments for command".into()),
+                None,
+            );
         }
 
         // parse replication_id
@@ -44,8 +51,11 @@ impl<'a> CommandExecutor for Psync<'a> {
         let replication_id = match replication_id {
             BulkString(k) => k,
             _ => {
-                return SimpleError(
-                    "ERR Invalid argument. replication_id must be a bulk string".into(),
+                return (
+                    SimpleError(
+                        "ERR Invalid argument. replication_id must be a bulk string".into(),
+                    ),
+                    None,
                 )
             }
         };
@@ -54,18 +64,29 @@ impl<'a> CommandExecutor for Psync<'a> {
         let offset = args[1];
         let offset = match offset {
             BulkString(v) => v,
-            _ => return SimpleError("ERR Invalid argument. offset must be a bulk string".into()),
+            _ => {
+                return (
+                    SimpleError("ERR Invalid argument. offset must be a bulk string".into()),
+                    None,
+                )
+            }
         };
 
         // when slave is connecting first time replication_id should be `?` and offset should be `-1`
         if Self::is_unknown_replication_id(replication_id.as_str())
             && Self::is_null_offset(offset.as_str())
         {
-            return SimpleString(format!("FULLRESYNC {} 0", master_role.replication_id));
+            let empty_file_payload = hex::decode("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2").unwrap();
+            let payload_bytes = BytesMut::from(empty_file_payload.as_slice());
+            return (
+                SimpleString(format!("FULLRESYNC {} 0", master_role.replication_id)),
+                Some(payload_bytes),
+            );
         }
 
-        return SimpleError(
-            "ERR - Supports FULLRESYNC for first-time replica connection only".into(),
+        return (
+            SimpleError("ERR - Supports FULLRESYNC for first-time replica connection only".into()),
+            None,
         );
     }
 }
