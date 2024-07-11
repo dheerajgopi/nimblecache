@@ -77,7 +77,9 @@ impl<'a> CommandExecutor for Psync<'a> {
             && Self::is_null_offset(offset.as_str())
         {
             let empty_file_payload = hex::decode("524544495330303131fa0972656469732d76657205372e322e30fa0a72656469732d62697473c040fa056374696d65c26d08bc65fa08757365642d6d656dc2b0c41000fa08616f662d62617365c000fff06e3bfec0ff5aa2").unwrap();
-            let payload_bytes = BytesMut::from(empty_file_payload.as_slice());
+            let byte_data_prefix = format!("${}\r\n", empty_file_payload.len());
+            let mut payload_bytes = BytesMut::from(byte_data_prefix.as_bytes());
+            payload_bytes.extend_from_slice(empty_file_payload.as_slice());
             return (
                 SimpleString(format!("FULLRESYNC {} 0", master_role.replication_id)),
                 Some(payload_bytes),

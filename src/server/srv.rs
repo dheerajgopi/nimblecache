@@ -1,12 +1,13 @@
 use crate::cli::args::Args;
 use crate::commands::cmd::Cmd;
 use crate::protocol::resp::handler::RespHandler;
-use crate::protocol::resp::traits::{RespReader, RespWriter};
+use crate::protocol::resp::traits::{BytesWriter, RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
 use crate::replication::replica::Replica;
 use crate::server::info::{Role, ServerInfo};
 use crate::storage::store::Store;
 use anyhow::Result;
+use bytes::BytesMut;
 use log::{error, info};
 use std::sync::Arc;
 use tokio::net::TcpListener;
@@ -76,9 +77,10 @@ impl<'a> TcpServer<'a> {
                     tokio::spawn(async move {
                         let mut resp_handler = RespHandler::new(&mut stream, 512);
                         loop {
-                            let resp_command: Result<Option<RespType>> = resp_handler.read().await;
+                            let resp_command: Result<(Option<RespType>, _)> =
+                                resp_handler.read().await;
                             let resp_command = match resp_command {
-                                Ok(cmd) => match cmd {
+                                Ok((cmd, _)) => match cmd {
                                     None => break,
                                     Some(cmd) => cmd,
                                 },
@@ -86,13 +88,20 @@ impl<'a> TcpServer<'a> {
                                     panic!("Error reading the RESP command")
                                 }
                             };
-                            let (res, _) = Cmd::execute(
+                            let (res, payload_bytes) = Cmd::execute(
                                 &resp_command,
                                 Arc::as_ref(&storage_arc),
                                 Arc::as_ref(&server_info_arc),
                             );
 
-                            resp_handler.write(&res).await.unwrap();
+                            // If available, add the bytes payload in the response
+                            if payload_bytes.is_none() {
+                                resp_handler.write(&res).await.unwrap();
+                            } else {
+                                let mut byte_data = BytesMut::from(res.serialize().as_bytes());
+                                byte_data.extend_from_slice(payload_bytes.unwrap().as_ref());
+                                resp_handler.write_bytes(byte_data.as_ref()).await.unwrap();
+                            }
                         }
                     });
                 }

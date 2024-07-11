@@ -1,6 +1,6 @@
-use crate::protocol::resp::traits::{RespReader, RespWriter};
+use crate::protocol::resp::traits::{BytesWriter, RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
-use anyhow::anyhow;
+use anyhow::{anyhow, Result};
 use bytes::BytesMut;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -24,17 +24,25 @@ impl<'a> RespHandler<'a> {
 
 impl<'a> RespReader for RespHandler<'a> {
     /// Parse the RESP value from the TcpStream.
-    async fn read(&mut self) -> anyhow::Result<Option<RespType>> {
+    /// Bytes payload will have some value only in special cases
+    /// like PSYNC.
+    async fn read(&mut self) -> Result<(Option<RespType>, Option<BytesMut>)> {
         let bytes_read = self.stream.read_buf(&mut self.buffer).await?;
 
         if bytes_read == 0 {
-            return Ok(None);
+            return Ok((None, None));
         }
 
-        let parsed_val = RespType::parse(self.buffer.split());
+        let mut buf = self.buffer.split();
+        let parsed_val = RespType::parse(buf.clone());
 
         return match parsed_val {
-            Ok(value) => Ok(Some(value.0)),
+            Ok((value, bytes_read)) => {
+                if bytes_read < buf.len() {
+                    return Ok((Some(value), Some(buf.split_off(bytes_read))));
+                }
+                Ok((Some(value), None))
+            }
             Err(err) => Err(err),
         };
     }
@@ -42,7 +50,7 @@ impl<'a> RespReader for RespHandler<'a> {
 
 impl<'a> RespWriter for RespHandler<'a> {
     /// Write the RESP value into the TcpStream and return the number of bytes written.
-    async fn write(&mut self, resp_data: &RespType) -> anyhow::Result<usize> {
+    async fn write(&mut self, resp_data: &RespType) -> Result<usize> {
         let write_data = self.stream.write(resp_data.serialize().as_bytes()).await;
         let bytes_written = match write_data {
             Ok(n) => n,
@@ -52,5 +60,15 @@ impl<'a> RespWriter for RespHandler<'a> {
         };
 
         Ok(bytes_written)
+    }
+}
+
+impl<'a> BytesWriter for RespHandler<'a> {
+    /// Write the byte values into the TcpStream and return the number of bytes written.
+    async fn write_bytes(&mut self, bytes: &[u8]) -> Result<usize> {
+        match self.stream.write(bytes).await {
+            Ok(b) => Ok(b),
+            Err(e) => Err(anyhow!("Error writing to TCP stream: {}", e)),
+        }
     }
 }

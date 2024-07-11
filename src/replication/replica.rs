@@ -7,6 +7,7 @@ use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
 use crate::server::info::{Role, ServerInfo};
 use anyhow::{anyhow, Result};
+use bytes::BytesMut;
 use log::info;
 use std::vec;
 use tokio::io::AsyncWriteExt;
@@ -146,10 +147,12 @@ impl<'a> Replica<'a> {
         // Try PSYNCing the master server
         let psync_res = self.psync_master(&mut stream).await;
         match psync_res {
-            Ok(full_resync) => {
+            Ok((full_resync, rdb_payload)) => {
                 if full_resync.is_error() {
                     return Err(anyhow!(full_resync.error_msg().unwrap()));
                 }
+
+                info!("RDB len: {}", rdb_payload.len());
 
                 info!(
                     "Received response for PSYNC during handshake: {}",
@@ -179,7 +182,7 @@ impl<'a> Replica<'a> {
         }
         let res = resp_handler.read().await;
         match res {
-            Ok(resp) => match resp {
+            Ok((resp, _)) => match resp {
                 None => return Err(anyhow!("Received null PONG from master during handshake")),
                 Some(pong) => Ok(pong),
             },
@@ -220,7 +223,7 @@ impl<'a> Replica<'a> {
         }
         let res = resp_handler.read().await;
         match res {
-            Ok(resp) => match resp {
+            Ok((resp, _)) => match resp {
                 None => {
                     return Err(anyhow!(
                         "Received null response for 'REPLCONF' from master during handshake"
@@ -244,12 +247,16 @@ impl<'a> Replica<'a> {
     }
 
     /// Send a PSYNC command to master and return the response.
-    async fn psync_master(&self, stream: &mut TcpStream) -> Result<RespType> {
+    /// PSYNC response will contain the SimpleString RESP response followed by
+    /// the RDB file in bytes.
+    async fn psync_master(&self, stream: &mut TcpStream) -> Result<(RespType, BytesMut)> {
         let mut resp_handler = RespHandler::new(stream, 512);
         let args = vec![
             RespType::BulkString("?".to_string()),
             RespType::BulkString("-1".to_string()),
         ];
+
+        // Send `PSYNC ? -1` to master
         let req = resp_handler
             .write(&Psync::build(Some(
                 args.iter()
@@ -272,15 +279,26 @@ impl<'a> Replica<'a> {
                 ))
             }
         }
+
+        // validate and return response
         let res = resp_handler.read().await;
         match res {
-            Ok(resp) => match resp {
+            Ok((resp, payload_bytes)) => match resp {
                 None => {
                     return Err(anyhow!(
                         "Received null response for 'PSYNC' from master during handshake"
                     ))
                 }
-                Some(full_resync) => Ok(full_resync),
+                Some(full_resync) => {
+                    match payload_bytes {
+                        None => {return Err(anyhow!(
+                            "Did not receive RDB payload in the response for 'PSYNC' from master during handshake"
+                        ))}
+                        Some(b) => {
+                            Ok((full_resync, b))
+                        }
+                    }
+                },
             },
             Err(e) => {
                 return Err(anyhow!(
