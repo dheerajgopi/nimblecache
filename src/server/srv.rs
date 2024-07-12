@@ -10,7 +10,7 @@ use anyhow::Result;
 use bytes::BytesMut;
 use log::info;
 use std::sync::Arc;
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 
 /// TCP server for communicating with Nimblecache.
 pub struct TcpServer<'a> {
@@ -93,11 +93,12 @@ impl<'a> TcpServer<'a> {
                                     panic!("Error reading the RESP command")
                                 }
                             };
-                            let (res, payload_bytes) = Cmd::execute(
+                            let cmd_response = Cmd::execute(
                                 &resp_command,
                                 Arc::as_ref(&storage_arc),
                                 Arc::as_ref(&server_config_arc),
                             );
+                            let (res, payload_bytes) = cmd_response.resp_output();
 
                             // If available, add the bytes payload in the response
                             if payload_bytes.is_none() {

@@ -22,16 +22,20 @@ impl Cmd {
         resp_val: &RespType,
         store: &Store,
         server_config: &ServerConfig,
-    ) -> (RespType, Option<BytesMut>) {
+    ) -> CmdResponse {
         let cmd_name_and_args = Cmd::extract_command_name_and_args(resp_val);
         let (cmd_name, args) = match cmd_name_and_args {
             Ok(cmd) => (cmd.0, cmd.1),
-            Err(e) => return (RespType::SimpleError(format!("(error) {:?}", e)), None),
+            Err(e) => {
+                return CmdResponse::FAILURE(FailureResponse {
+                    error: RespType::SimpleError(format!("(error) {:?}", e)),
+                })
+            }
         };
         let args = args.iter().map(|a| a).collect::<Vec<&RespType>>();
         let args = args.as_slice();
 
-        match cmd_name.to_uppercase().as_str() {
+        let (res, bytes_payload) = match cmd_name.to_uppercase().as_str() {
             "ECHO" => echo::Echo {}.execute(args),
             "GET" => get::Get::new(store).execute(args),
             "INFO" => info::Info::new(server_config).execute(args),
@@ -39,11 +43,21 @@ impl Cmd {
             "SET" => set::Set::new(store).execute(args),
             "REPLCONF" => replconf::Replconf {}.execute(args),
             "PSYNC" => psync::Psync::new(server_config).execute(args),
-            _ => (
-                RespType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name)),
-                None,
-            ),
-        }
+            _ => {
+                return CmdResponse::FAILURE(FailureResponse {
+                    error: RespType::SimpleError(format!(
+                        "(error) unknown command '{:?}'",
+                        cmd_name
+                    )),
+                })
+            }
+        };
+
+        CmdResponse::SUCCESS(SuccessResponse {
+            output: res,
+            bytes_payload,
+            cmd_name,
+        })
     }
 
     fn extract_command_name_and_args(resp_val: &RespType) -> Result<(String, Vec<RespType>)> {
@@ -70,4 +84,44 @@ impl Cmd {
 
         Ok((cmd_name.into(), args))
     }
+}
+
+/// Wraps the success/failure response returned after executing the Nimblecache commands
+pub enum CmdResponse {
+    SUCCESS(SuccessResponse),
+    FAILURE(FailureResponse),
+}
+
+impl CmdResponse {
+    /// Returns the RESP response and the optional bytes payload (for e.g. PSYNC rdb files)
+    pub fn resp_output(self) -> (RespType, Option<BytesMut>) {
+        match self {
+            CmdResponse::SUCCESS(s) => (s.output, s.bytes_payload),
+            CmdResponse::FAILURE(f) => (f.error, None),
+        }
+    }
+
+    /// Successful handshake happens when PSYNC command from replica returns SUCCESS response.
+    pub fn is_successful_handshake_from_replica(&self) -> bool {
+        match self {
+            CmdResponse::SUCCESS(s) => {
+                if s.cmd_name == "PSYNC" {
+                    true
+                } else {
+                    false
+                }
+            }
+            CmdResponse::FAILURE(_) => false,
+        }
+    }
+}
+
+pub struct SuccessResponse {
+    output: RespType,
+    bytes_payload: Option<BytesMut>,
+    cmd_name: String,
+}
+
+pub struct FailureResponse {
+    error: RespType,
 }
