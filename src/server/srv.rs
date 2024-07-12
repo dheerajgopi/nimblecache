@@ -3,12 +3,12 @@ use crate::commands::cmd::Cmd;
 use crate::protocol::resp::handler::RespHandler;
 use crate::protocol::resp::traits::{BytesWriter, RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
-use crate::replication::replica::Replica;
-use crate::server::info::{Role, ServerInfo};
+use crate::replication::handshake;
+use crate::server::info::{Role, ServerConfig};
 use crate::storage::store::Store;
 use anyhow::Result;
 use bytes::BytesMut;
-use log::{error, info};
+use log::info;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
@@ -16,33 +16,38 @@ use tokio::net::TcpListener;
 pub struct TcpServer<'a> {
     /// Arguments to be passed while instantiating the server.
     args: &'a Args,
+    cfg: ServerConfig,
 }
 
 impl<'a> TcpServer<'a> {
     pub fn new(args: &Args) -> TcpServer {
-        TcpServer { args }
+        let srv_cfg = ServerConfig::new(args);
+        let srv_cfg = match srv_cfg {
+            Ok(si) => si,
+            Err(e) => {
+                panic!("Error while initializing server {}", e)
+            }
+        };
+
+        TcpServer { args, cfg: srv_cfg }
     }
 
     /// Start listening to the post specified in the program arguments [Self::Args].
     /// If no ports are specified, it will default to port 6379.
-    pub async fn start(&self) {
-        // Assume master/slave role
-        let role = match Role::from_str(self.args.replica_of.as_str()) {
-            Ok(r) => r,
-            Err(e) => {
-                error!("error: {}", e);
-                panic!("Error while starting the server. Error: {}", e)
+    pub async fn start(self) {
+        let server_config = self.cfg.clone();
+        let role = server_config.role;
+        let master = server_config.master;
+        match role {
+            Role::MASTER => {
+                info!("Assuming role as master");
             }
-        };
-        let server_info = ServerInfo::new(role, self.args.port);
-        info!("Assuming role as {}", server_info.role);
+            Role::SLAVE => {
+                let master = &master.unwrap();
+                info!("Assuming role as slave of {}:{}", master.host, master.port);
 
-        // Replica server (slave) should perform handshake with master
-        match server_info.role {
-            Role::MASTER(_) => {}
-            Role::SLAVE(_) => {
-                let replica = Replica::new(&server_info);
-                match replica.handshake().await {
+                // Replica server (slave) should perform handshake with master
+                match handshake::Handshake::start(master.clone()).await {
                     Ok(_) => {
                         info!("Handshake success")
                     }
@@ -53,7 +58,7 @@ impl<'a> TcpServer<'a> {
             }
         }
 
-        let server_info_arc = Arc::new(server_info);
+        let server_config_arc = Arc::new(self.cfg.clone());
 
         let addr = format!("127.0.0.1:{}", self.args.port);
         info!("Starting TCP listener on port {}", self.args.port);
@@ -65,7 +70,7 @@ impl<'a> TcpServer<'a> {
         loop {
             let stream = listener.accept().await;
             let storage_arc = Arc::clone(&storage_arc);
-            let server_info_arc = Arc::clone(&server_info_arc);
+            let server_config_arc = Arc::clone(&server_config_arc);
 
             match stream {
                 Ok((mut stream, _)) => {
@@ -91,7 +96,7 @@ impl<'a> TcpServer<'a> {
                             let (res, payload_bytes) = Cmd::execute(
                                 &resp_command,
                                 Arc::as_ref(&storage_arc),
-                                Arc::as_ref(&server_info_arc),
+                                Arc::as_ref(&server_config_arc),
                             );
 
                             // If available, add the bytes payload in the response
@@ -106,9 +111,9 @@ impl<'a> TcpServer<'a> {
                     });
                 }
                 Err(e) => {
-                    error!("error: {}", e);
+                    panic!("error: {}", e)
                 }
-            }
+            };
         }
     }
 }

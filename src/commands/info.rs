@@ -1,6 +1,6 @@
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::SimpleError;
-use crate::{commands::traits::CommandExecutor, server::info::ServerInfo};
+use crate::{commands::traits::CommandExecutor, server::info::ServerConfig};
 
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
@@ -10,13 +10,13 @@ const ALL_INFO_ARGS: [InfoArg; 1] = [InfoArg::REPLICATION];
 /// Struct for the INFO command.
 pub struct Info<'a> {
     /// Used to fetch server info
-    server: &'a ServerInfo,
+    server_config: &'a ServerConfig,
 }
 
 impl<'a> Info<'a> {
     /// Create new Info command struct
-    pub fn new(server: &ServerInfo) -> Info {
-        Info { server: server }
+    pub fn new(server_config: &ServerConfig) -> Info {
+        Info { server_config }
     }
 }
 
@@ -50,7 +50,9 @@ impl<'a> CommandExecutor for Info<'a> {
 
         for info_arg in info_args {
             let section = match info_arg {
-                InfoArg::REPLICATION => format!("# Replication\n{}\n", self.server.role.info_str()),
+                InfoArg::REPLICATION => {
+                    format!("# Replication\n{}\n", self.server_config.info_replication())
+                }
             };
 
             info.push_str(section.as_str())

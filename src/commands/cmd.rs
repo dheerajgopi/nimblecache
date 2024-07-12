@@ -1,7 +1,7 @@
 use crate::commands::traits::CommandExecutor;
 use crate::commands::{echo, get, info, ping, psync, replconf, set};
 use crate::protocol::resp::types::RespType;
-use crate::server::info::ServerInfo;
+use crate::server::info::ServerConfig;
 use crate::storage::store::Store;
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
@@ -21,7 +21,7 @@ impl Cmd {
     pub fn execute(
         resp_val: &RespType,
         store: &Store,
-        server_info: &ServerInfo,
+        server_config: &ServerConfig,
     ) -> (RespType, Option<BytesMut>) {
         let cmd_name_and_args = Cmd::extract_command_name_and_args(resp_val);
         let (cmd_name, args) = match cmd_name_and_args {
@@ -34,11 +34,11 @@ impl Cmd {
         match cmd_name.to_uppercase().as_str() {
             "ECHO" => echo::Echo {}.execute(args),
             "GET" => get::Get::new(store).execute(args),
-            "INFO" => info::Info::new(server_info).execute(args),
+            "INFO" => info::Info::new(server_config).execute(args),
             "PING" => ping::Ping {}.execute(args),
             "SET" => set::Set::new(store).execute(args),
             "REPLCONF" => replconf::Replconf {}.execute(args),
-            "PSYNC" => psync::Psync::new(server_info).execute(args),
+            "PSYNC" => psync::Psync::new(server_config).execute(args),
             _ => (
                 RespType::SimpleError(format!("(error) unknown command '{:?}'", cmd_name)),
                 None,

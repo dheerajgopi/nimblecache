@@ -1,18 +1,18 @@
 use crate::commands::traits::{CommandBuilder, CommandExecutor};
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::{BulkString, SimpleError, SimpleString};
-use crate::server::info::{Role, ServerInfo};
+use crate::server::info::{Role, ServerConfig};
 use bytes::BytesMut;
 
 /// Struct for the PSYNC command.
 pub struct Psync<'a> {
     /// Used to fetch server info
-    server: &'a ServerInfo,
+    server_config: &'a ServerConfig,
 }
 
 impl<'a> Psync<'a> {
-    pub fn new(server: &ServerInfo) -> Psync {
-        Psync { server }
+    pub fn new(server_config: &ServerConfig) -> Psync {
+        Psync { server_config }
     }
 
     fn is_unknown_replication_id(repl_id: &str) -> bool {
@@ -29,9 +29,9 @@ impl<'a> CommandExecutor for Psync<'a> {
     /// Supports only first-time replica connection as of now.
     /// TODO: Actual replication configuration
     fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
-        let master_role = match &self.server.role {
-            Role::MASTER(m) => m,
-            Role::SLAVE(_) => {
+        match &self.server_config.role {
+            Role::MASTER => {}
+            Role::SLAVE => {
                 return (
                     SimpleError("PSYNC cannot be performed by a slave server".into()),
                     None,
@@ -81,7 +81,10 @@ impl<'a> CommandExecutor for Psync<'a> {
             let mut payload_bytes = BytesMut::from(byte_data_prefix.as_bytes());
             payload_bytes.extend_from_slice(empty_file_payload.as_slice());
             return (
-                SimpleString(format!("FULLRESYNC {} 0", master_role.replication_id)),
+                SimpleString(format!(
+                    "FULLRESYNC {} 0",
+                    self.server_config.replication.id
+                )),
                 Some(payload_bytes),
             );
         }

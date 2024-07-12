@@ -5,7 +5,7 @@ use crate::commands::traits::CommandBuilder;
 use crate::protocol::resp::handler::RespHandler;
 use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
-use crate::server::info::{Role, ServerInfo};
+use crate::server::info::Master;
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
 use log::info;
@@ -13,18 +13,10 @@ use std::vec;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 
-/// This is used for operations related to replica server like:
-/// - Handshake with master server.
-pub struct Replica<'a> {
-    /// Server info
-    svr_info: &'a ServerInfo,
-}
+/// This is used for replica-master handshake process.
+pub struct Handshake {}
 
-impl<'a> Replica<'a> {
-    pub fn new(svr_info: &ServerInfo) -> Replica {
-        Replica { svr_info }
-    }
-
+impl Handshake {
     /// Perform handshake with master server during the replica server initialization, and
     /// returns the TCP connection.
     ///
@@ -34,30 +26,19 @@ impl<'a> Replica<'a> {
     ///         where `<PORT>` is the port where the replica is listening.
     ///
     /// Step: Send PSYNC <REPLICATION_ID> <OFFSET> command to master.
-    pub async fn handshake(&self) -> Result<()> {
+    pub async fn start(master: Master) -> Result<()> {
         // get master host and port
-        let slave_info = match &self.svr_info.role {
-            Role::MASTER(_) => {
-                return Err(anyhow!(
-                    "Server with master role cannot be added as a replica"
-                ));
-            }
-            Role::SLAVE(s) => s,
-        };
+        let (master_host, master_port) = (master.host, master.port);
 
         // try opening a connection to master server
-        let stream = TcpStream::connect(format!(
-            "{}:{}",
-            slave_info.master_host, slave_info.master_port
-        ))
-        .await;
+        let stream = TcpStream::connect(format!("{}:{}", master_host, master_port)).await;
         let mut stream = match stream {
             Ok(s) => s,
             Err(e) => return Err(anyhow!("Handshake failed with error: {}", e)),
         };
 
         // Try PINGing the master server
-        let ping_res = self.ping_master(&mut stream).await;
+        let ping_res = Self::ping_master(&mut stream).await;
         match ping_res {
             Ok(pong) => {
                 if pong.is_error() {
@@ -84,13 +65,13 @@ impl<'a> Replica<'a> {
         // Try REPLCONF listening-port with the master server
         let replconf_args = vec![
             RespType::BulkString("listening-port".to_string()),
-            RespType::BulkString(format!("{}", self.svr_info.port)),
+            RespType::BulkString(format!("{}", master.port)),
         ];
         info!(
             "Sending 'REPLCONF listening-port {}' request to master",
-            self.svr_info.port
+            master.port
         );
-        let replconf_res = self.replconf_master(&mut stream, replconf_args).await;
+        let replconf_res = Self::replconf_master(&mut stream, replconf_args).await;
         match replconf_res {
             Ok(ok) => {
                 if ok.is_error() {
@@ -120,7 +101,7 @@ impl<'a> Replica<'a> {
             RespType::BulkString("psync2".to_string()),
         ];
         info!("Sending 'REPLCONF capa psync2' request to master");
-        let replconf_res = self.replconf_master(&mut stream, replconf_args).await;
+        let replconf_res = Self::replconf_master(&mut stream, replconf_args).await;
         match replconf_res {
             Ok(ok) => {
                 if ok.is_error() {
@@ -145,7 +126,7 @@ impl<'a> Replica<'a> {
         }
 
         // Try PSYNCing the master server
-        let psync_res = self.psync_master(&mut stream).await;
+        let psync_res = Self::psync_master(&mut stream).await;
         match psync_res {
             Ok((full_resync, rdb_payload)) => {
                 if full_resync.is_error() {
@@ -168,7 +149,7 @@ impl<'a> Replica<'a> {
     }
 
     /// Send a PING command to master and return the response.
-    async fn ping_master(&self, stream: &mut TcpStream) -> Result<RespType> {
+    async fn ping_master(stream: &mut TcpStream) -> Result<RespType> {
         let mut resp_handler = RespHandler::new(stream, 512);
         let req = resp_handler.write(&Ping::build(None)).await;
         match req {
@@ -197,7 +178,6 @@ impl<'a> Replica<'a> {
 
     /// Send a REPLCONF command to master and return the response.
     async fn replconf_master(
-        &self,
         stream: &mut TcpStream,
         replconf_args: Vec<RespType>,
     ) -> Result<RespType> {
@@ -249,7 +229,7 @@ impl<'a> Replica<'a> {
     /// Send a PSYNC command to master and return the response.
     /// PSYNC response will contain the SimpleString RESP response followed by
     /// the RDB file in bytes.
-    async fn psync_master(&self, stream: &mut TcpStream) -> Result<(RespType, BytesMut)> {
+    async fn psync_master(stream: &mut TcpStream) -> Result<(RespType, BytesMut)> {
         let mut resp_handler = RespHandler::new(stream, 512);
         let args = vec![
             RespType::BulkString("?".to_string()),
