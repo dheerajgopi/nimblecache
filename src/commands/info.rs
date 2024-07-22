@@ -2,21 +2,27 @@ use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::SimpleError;
 use crate::{commands::traits::CommandExecutor, server::info::ServerConfig};
 
+use crate::commands::traits::CommandHandler;
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
+use tokio::net::TcpStream;
 
 const ALL_INFO_ARGS: [InfoArg; 1] = [InfoArg::REPLICATION];
 
 /// Struct for the INFO command.
 pub struct Info<'a> {
+    stream: &'a mut TcpStream,
     /// Used to fetch server info
     server_config: &'a ServerConfig,
 }
 
 impl<'a> Info<'a> {
     /// Create new Info command struct
-    pub fn new(server_config: &ServerConfig) -> Info {
-        Info { server_config }
+    pub fn new(stream: &'a mut TcpStream, server_config: &'a ServerConfig) -> Info<'a> {
+        Info {
+            stream,
+            server_config,
+        }
     }
 }
 
@@ -27,7 +33,7 @@ impl<'a> CommandExecutor for Info<'a> {
     ///
     /// # Supported optional params
     /// - replication : Master/replica replication information.
-    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
+    fn execute(&self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
         let mut info_args = vec![];
 
         // get the info sections to be returned
@@ -62,6 +68,14 @@ impl<'a> CommandExecutor for Info<'a> {
     }
 }
 
+impl<'a> CommandHandler for Info<'a> {
+    /// Execute the INFO command, and then write the output to the response TCP stream.
+    async fn handle(&mut self, args: &[&RespType]) -> Result<usize> {
+        let (res, _) = self.execute(args);
+        RespType::write_to_stream(self.stream, &res).await
+    }
+}
+
 /// Arguments supported by the INFO command.
 enum InfoArg {
     /// Info about replication.
@@ -69,6 +83,11 @@ enum InfoArg {
 }
 
 impl InfoArg {
+    /// Parse the optional params for valid values.
+    ///
+    /// # Validations
+    /// - Optional params should be in BulkString format.
+    /// - Valid optional param values - `REPLICATION`.
     fn parse(arg: &RespType) -> Result<InfoArg> {
         let s = match arg {
             RespType::BulkString(s) => s,

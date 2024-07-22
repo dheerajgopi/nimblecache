@@ -1,20 +1,23 @@
-use crate::commands::traits::CommandExecutor;
+use crate::commands::traits::{CommandExecutor, CommandHandler};
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::{BulkString, SimpleError};
 use crate::storage::store::Store;
+use anyhow::Result;
 use bytes::BytesMut;
+use tokio::net::TcpStream;
 
 /// Struct for the GET command.
 /// It holds the pointer to the backing data store.
 pub struct Get<'a> {
+    stream: &'a mut TcpStream,
     /// Pointer to the data store.
     store: &'a Store,
 }
 
 impl<'a> Get<'a> {
     /// Creates a new GET command struct.
-    pub fn new(store: &Store) -> Get {
-        Get { store }
+    pub fn new(stream: &'a mut TcpStream, store: &'a Store) -> Get<'a> {
+        Get { stream, store }
     }
 }
 
@@ -30,7 +33,7 @@ impl<'a> CommandExecutor for Get<'a> {
     ///
     /// # Errors
     /// The validation errors are returned as SimpleError RESP type.
-    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
+    fn execute(&self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
         if args.len() != 1 {
             return (
                 SimpleError("ERR wrong number of arguments for command".into()),
@@ -60,5 +63,13 @@ impl<'a> CommandExecutor for Get<'a> {
         }
 
         (BulkString(value.val().to_string()), None)
+    }
+}
+
+impl<'a> CommandHandler for Get<'a> {
+    /// Execute the GET command, and then write the output to the response TCP stream.
+    async fn handle(&mut self, args: &[&RespType]) -> Result<usize> {
+        let (res, _) = self.execute(args);
+        RespType::write_to_stream(self.stream, &res).await
     }
 }

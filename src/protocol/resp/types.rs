@@ -1,5 +1,7 @@
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
 
 /// Nimblecache supports Redis Serialization Protocol or RESP.
 /// This enum is a wrapper for the different RESP types.
@@ -39,6 +41,46 @@ impl RespType {
             '-' => Self::new_simple_error(buffer),
             _ => Err(anyhow!("Invalid RESP data type {:?}", buffer)),
         };
+    }
+
+    /// Parse and return the RESP data from the TCP stream.
+    /// The return value is a tuple where the first item is the RESP data, and the second item
+    /// is a BytesMut value containing the extra bytes in the stream coming after the RESP data.
+    pub async fn from_stream(
+        stream: &mut TcpStream,
+        buffer: &mut BytesMut,
+    ) -> Result<(Option<RespType>, Option<BytesMut>)> {
+        let bytes_read = stream.read_buf(buffer).await?;
+
+        if bytes_read == 0 {
+            return Ok((None, None));
+        }
+
+        let mut buf = buffer.split();
+        let parsed_val = RespType::parse(buf.clone());
+
+        return match parsed_val {
+            Ok((value, bytes_read)) => {
+                if bytes_read < buf.len() {
+                    return Ok((Some(value), Some(buf.split_off(bytes_read))));
+                }
+                Ok((Some(value), None))
+            }
+            Err(err) => Err(err),
+        };
+    }
+
+    /// Writes the RESP data into the TCP stream.
+    pub async fn write_to_stream(stream: &mut TcpStream, resp_data: &RespType) -> Result<usize> {
+        let write_data = stream.write(resp_data.serialize().as_bytes()).await;
+        let bytes_written = match write_data {
+            Ok(n) => n,
+            Err(_) => {
+                return Err(anyhow!("Failed to write into TcpStream"));
+            }
+        };
+
+        Ok(bytes_written)
     }
 
     /// Parse the given bytes into a SimpleString RESP value. This will return the parsed RESP

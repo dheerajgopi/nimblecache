@@ -1,16 +1,15 @@
 use crate::cli::args::Args;
-use crate::commands::cmd::Cmd;
-use crate::protocol::resp::handler::RespHandler;
-use crate::protocol::resp::traits::{BytesWriter, RespReader, RespWriter};
+use crate::commands::handler::RespCommandHandler;
 use crate::protocol::resp::types::RespType;
 use crate::replication::handshake;
 use crate::server::info::{Role, ServerConfig};
 use crate::storage::store::Store;
-use anyhow::Result;
 use bytes::BytesMut;
-use log::info;
+use log::{info, warn};
 use std::sync::Arc;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
+
+const EMPTY_ARGS: Vec<RespType> = vec![];
 
 /// TCP server for communicating with Nimblecache.
 pub struct TcpServer<'a> {
@@ -80,34 +79,32 @@ impl<'a> TcpServer<'a> {
                     );
 
                     tokio::spawn(async move {
-                        let mut resp_handler = RespHandler::new(&mut stream, 512);
                         loop {
-                            let resp_command: Result<(Option<RespType>, _)> =
-                                resp_handler.read().await;
-                            let resp_command = match resp_command {
-                                Ok((cmd, _)) => match cmd {
-                                    None => break,
-                                    Some(cmd) => cmd,
-                                },
-                                Err(_) => {
-                                    panic!("Error reading the RESP command")
-                                }
-                            };
-                            let cmd_response = Cmd::execute(
-                                &resp_command,
+                            let buffer = BytesMut::with_capacity(512);
+                            let resp_handler = RespCommandHandler::from(
+                                &mut stream,
+                                buffer,
                                 Arc::as_ref(&storage_arc),
                                 Arc::as_ref(&server_config_arc),
-                            );
-                            let (res, payload_bytes) = cmd_response.resp_output();
+                            )
+                            .await;
+                            let (mut resp_handler, args) = match resp_handler {
+                                Ok((h, args)) => (h, args),
+                                Err(e) => {
+                                    warn!("Error reading the request: {}", e);
+                                    (RespCommandHandler::err_handler(&mut stream, e), EMPTY_ARGS)
+                                }
+                            };
 
-                            // If available, add the bytes payload in the response
-                            if payload_bytes.is_none() {
-                                resp_handler.write(&res).await.unwrap();
-                            } else {
-                                let mut byte_data = BytesMut::from(res.serialize().as_bytes());
-                                byte_data.extend_from_slice(payload_bytes.unwrap().as_ref());
-                                resp_handler.write_bytes(byte_data.as_ref()).await.unwrap();
+                            // NULL handler is used to skip the loop in case 0 bytes are read from the stream
+                            match resp_handler {
+                                RespCommandHandler::NULL => continue,
+                                _ => {}
                             }
+
+                            let args = args.iter().map(|a| a).collect::<Vec<&RespType>>();
+                            let args = args.as_slice();
+                            resp_handler.handle(args).await.unwrap();
                         }
                     });
                 }

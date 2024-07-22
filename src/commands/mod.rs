@@ -1,6 +1,6 @@
-pub mod cmd;
 pub mod echo;
 pub mod get;
+pub mod handler;
 pub mod info;
 pub mod ping;
 pub mod psync;

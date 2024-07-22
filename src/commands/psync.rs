@@ -1,18 +1,25 @@
-use crate::commands::traits::{CommandBuilder, CommandExecutor};
+use crate::commands::traits::{CommandBuilder, CommandExecutor, CommandHandler};
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::{BulkString, SimpleError, SimpleString};
 use crate::server::info::{Role, ServerConfig};
+use anyhow::anyhow;
 use bytes::BytesMut;
+use tokio::io::AsyncWriteExt;
+use tokio::net::TcpStream;
 
 /// Struct for the PSYNC command.
 pub struct Psync<'a> {
+    stream: &'a mut TcpStream,
     /// Used to fetch server info
     server_config: &'a ServerConfig,
 }
 
 impl<'a> Psync<'a> {
-    pub fn new(server_config: &ServerConfig) -> Psync {
-        Psync { server_config }
+    pub fn new(stream: &'a mut TcpStream, server_config: &'a ServerConfig) -> Psync<'a> {
+        Psync {
+            stream,
+            server_config,
+        }
     }
 
     fn is_unknown_replication_id(repl_id: &str) -> bool {
@@ -28,7 +35,7 @@ impl<'a> CommandExecutor for Psync<'a> {
     /// Blindly return a FULLRESYNC response for now.
     /// Supports only first-time replica connection as of now.
     /// TODO: Actual replication configuration
-    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
+    fn execute(&self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
         match &self.server_config.role {
             Role::MASTER => {}
             Role::SLAVE => {
@@ -93,6 +100,31 @@ impl<'a> CommandExecutor for Psync<'a> {
             SimpleError("ERR - Supports FULLRESYNC for first-time replica connection only".into()),
             None,
         );
+    }
+}
+
+impl<'a> CommandHandler for Psync<'a> {
+    /// Execute the PSYNC command, and then write the output to the response TCP stream.
+    /// The PSYNC output can have the RDB file as its output. That will also be written to
+    /// the response stream.
+    async fn handle(&mut self, args: &[&RespType]) -> anyhow::Result<usize> {
+        let (res, payload_bytes) = self.execute(args);
+        let resp_bytes = RespType::write_to_stream(self.stream, &res).await;
+        let resp_bytes = match resp_bytes {
+            Ok(b) => b,
+            Err(_) => return Err(anyhow!("Failed to write data into response stream")),
+        };
+
+        match payload_bytes {
+            None => Ok(resp_bytes),
+            Some(b) => {
+                let raw_bytes = self.stream.write(b.as_ref()).await;
+                match raw_bytes {
+                    Ok(bytes_written) => Ok(resp_bytes + bytes_written),
+                    Err(e) => Err(anyhow!("Failed to write RDB payload bytes: {}", e)),
+                }
+            }
+        }
     }
 }
 

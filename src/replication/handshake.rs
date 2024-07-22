@@ -2,8 +2,6 @@ use crate::commands::ping::Ping;
 use crate::commands::psync::Psync;
 use crate::commands::replconf::Replconf;
 use crate::commands::traits::CommandBuilder;
-use crate::protocol::resp::handler::RespHandler;
-use crate::protocol::resp::traits::{RespReader, RespWriter};
 use crate::protocol::resp::types::RespType;
 use crate::server::info::Master;
 use anyhow::{anyhow, Result};
@@ -59,7 +57,7 @@ impl Handshake {
         let flush = stream.flush().await;
         match flush {
             Ok(_) => {}
-            Err(_) => {}
+            Err(e) => return Err(anyhow!("Handshake failed with error: {}", e)),
         }
 
         // Try REPLCONF listening-port with the master server
@@ -92,7 +90,7 @@ impl Handshake {
         let flush = stream.flush().await;
         match flush {
             Ok(_) => {}
-            Err(_) => {}
+            Err(e) => return Err(anyhow!("Handshake failed with error: {}", e)),
         }
 
         // Try REPLCONF capa psync2 with the master server
@@ -122,7 +120,7 @@ impl Handshake {
         let flush = stream.flush().await;
         match flush {
             Ok(_) => {}
-            Err(_) => {}
+            Err(e) => return Err(anyhow!("Handshake failed with error: {}", e)),
         }
 
         // Try PSYNCing the master server
@@ -150,8 +148,7 @@ impl Handshake {
 
     /// Send a PING command to master and return the response.
     async fn ping_master(stream: &mut TcpStream) -> Result<RespType> {
-        let mut resp_handler = RespHandler::new(stream, 512);
-        let req = resp_handler.write(&Ping::build(None)).await;
+        let req = RespType::write_to_stream(stream, &Ping::build(None)).await;
         match req {
             Ok(b) => {
                 info!(
@@ -161,7 +158,9 @@ impl Handshake {
             }
             Err(e) => return Err(anyhow!("Failed to PING master during handshake: {}", e)),
         }
-        let res = resp_handler.read().await;
+
+        let mut buffer = BytesMut::with_capacity(512);
+        let res = RespType::from_stream(stream, &mut buffer).await;
         match res {
             Ok((resp, _)) => match resp {
                 None => return Err(anyhow!("Received null PONG from master during handshake")),
@@ -181,12 +180,13 @@ impl Handshake {
         stream: &mut TcpStream,
         replconf_args: Vec<RespType>,
     ) -> Result<RespType> {
-        let mut resp_handler = RespHandler::new(stream, 512);
-        let req = resp_handler
-            .write(&Replconf::build(Some(
+        let req = RespType::write_to_stream(
+            stream,
+            &Replconf::build(Some(
                 replconf_args.iter().collect::<Vec<&RespType>>().as_slice(),
-            )))
-            .await;
+            )),
+        )
+        .await;
         match req {
             Ok(b) => {
                 info!(
@@ -201,7 +201,8 @@ impl Handshake {
                 ))
             }
         }
-        let res = resp_handler.read().await;
+        let mut buffer = BytesMut::with_capacity(512);
+        let res = RespType::from_stream(stream, &mut buffer).await;
         match res {
             Ok((resp, _)) => match resp {
                 None => {
@@ -230,21 +231,22 @@ impl Handshake {
     /// PSYNC response will contain the SimpleString RESP response followed by
     /// the RDB file in bytes.
     async fn psync_master(stream: &mut TcpStream) -> Result<(RespType, BytesMut)> {
-        let mut resp_handler = RespHandler::new(stream, 512);
         let args = vec![
             RespType::BulkString("?".to_string()),
             RespType::BulkString("-1".to_string()),
         ];
 
         // Send `PSYNC ? -1` to master
-        let req = resp_handler
-            .write(&Psync::build(Some(
+        let req = RespType::write_to_stream(
+            stream,
+            &Psync::build(Some(
                 args.iter()
                     .map(|a| a)
                     .collect::<Vec<&RespType>>()
                     .as_slice(),
-            )))
-            .await;
+            )),
+        )
+        .await;
         match req {
             Ok(b) => {
                 info!(
@@ -261,7 +263,8 @@ impl Handshake {
         }
 
         // validate and return response
-        let res = resp_handler.read().await;
+        let mut buffer = BytesMut::with_capacity(512);
+        let res = RespType::from_stream(stream, &mut buffer).await;
         match res {
             Ok((resp, payload_bytes)) => match resp {
                 None => {

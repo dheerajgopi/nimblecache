@@ -1,22 +1,24 @@
-use crate::commands::traits::CommandExecutor;
+use crate::commands::traits::{CommandExecutor, CommandHandler};
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::{BulkString, SimpleError};
 use crate::storage::store::Store;
 use crate::storage::value::StringValue;
 use anyhow::{anyhow, Result};
 use bytes::BytesMut;
+use tokio::net::TcpStream;
 
 /// Struct for the SET command.
 /// It holds the pointer to the backing data store.
 pub struct Set<'a> {
+    stream: &'a mut TcpStream,
     /// Pointer to the data store.
     store: &'a Store,
 }
 
 impl<'a> Set<'a> {
     /// Creates a new SET command struct.
-    pub fn new(store: &Store) -> Set {
-        Set { store }
+    pub fn new(stream: &'a mut TcpStream, store: &'a Store) -> Set<'a> {
+        Set { stream, store }
     }
 }
 
@@ -37,7 +39,7 @@ impl<'a> CommandExecutor for Set<'a> {
     ///
     /// # Errors
     /// The validation errors are returned as SimpleError RESP type.
-    fn execute(&mut self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
+    fn execute(&self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
         if args.len() < 2 {
             return (
                 SimpleError("ERR insufficient arguments for command".into()),
@@ -96,6 +98,14 @@ impl<'a> CommandExecutor for Set<'a> {
         self.store.put(key.clone(), val);
 
         (BulkString("OK".into()), None)
+    }
+}
+
+impl<'a> CommandHandler for Set<'a> {
+    /// Execute the SET command, and then write the output to the response TCP stream.
+    async fn handle(&mut self, args: &[&RespType]) -> Result<usize> {
+        let (res, _) = self.execute(args);
+        RespType::write_to_stream(self.stream, &res).await
     }
 }
 
