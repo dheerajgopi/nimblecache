@@ -1,21 +1,24 @@
 use crate::commands::traits::{CommandBuilder, CommandExecutor, CommandHandler};
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::{BulkString, SimpleError, SimpleString};
+use crate::replication::peer::Peer;
 use crate::server::info::{Role, ServerConfig};
 use anyhow::anyhow;
 use bytes::BytesMut;
+use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
+use tokio::sync::mpsc::unbounded_channel;
 
 /// Struct for the PSYNC command.
 pub struct Psync<'a> {
     stream: &'a mut TcpStream,
     /// Used to fetch server info
-    server_config: &'a ServerConfig,
+    server_config: Arc<ServerConfig>,
 }
 
 impl<'a> Psync<'a> {
-    pub fn new(stream: &'a mut TcpStream, server_config: &'a ServerConfig) -> Psync<'a> {
+    pub fn new(stream: &'a mut TcpStream, server_config: Arc<ServerConfig>) -> Psync<'a> {
         Psync {
             stream,
             server_config,
@@ -36,7 +39,8 @@ impl<'a> CommandExecutor for Psync<'a> {
     /// Supports only first-time replica connection as of now.
     /// TODO: Actual replication configuration
     fn execute(&self, args: &[&RespType]) -> (RespType, Option<BytesMut>) {
-        match &self.server_config.role {
+        let svr_config = self.server_config.as_ref();
+        match svr_config.role {
             Role::MASTER => {}
             Role::SLAVE => {
                 return (
@@ -88,10 +92,7 @@ impl<'a> CommandExecutor for Psync<'a> {
             let mut payload_bytes = BytesMut::from(byte_data_prefix.as_bytes());
             payload_bytes.extend_from_slice(empty_file_payload.as_slice());
             return (
-                SimpleString(format!(
-                    "FULLRESYNC {} 0",
-                    self.server_config.replication.id
-                )),
+                SimpleString(format!("FULLRESYNC {} 0", svr_config.replication.id)),
                 Some(payload_bytes),
             );
         }
@@ -108,6 +109,7 @@ impl<'a> CommandHandler for Psync<'a> {
     /// The PSYNC output can have the RDB file as its output. That will also be written to
     /// the response stream.
     async fn handle(&mut self, args: &[&RespType]) -> anyhow::Result<usize> {
+        let svr_config = self.server_config.as_ref();
         let (res, payload_bytes) = self.execute(args);
         let resp_bytes = RespType::write_to_stream(self.stream, &res).await;
         let resp_bytes = match resp_bytes {
@@ -118,7 +120,25 @@ impl<'a> CommandHandler for Psync<'a> {
         match payload_bytes {
             None => Ok(resp_bytes),
             Some(b) => {
+                let peer_socket = self.stream.peer_addr().unwrap();
+                // let peer_ip = peer_socket.ip();
+                // let peer_port: u16 = 6380;
+                // let peer_stream = TcpStream::connect(format!("{}:{}", peer_ip, peer_port)).await.unwrap();
+
                 let raw_bytes = self.stream.write(b.as_ref()).await;
+
+                let peer = Peer::new(peer_socket);
+                let (sender, _) = unbounded_channel::<RespType>();
+
+                let mut replicas = match svr_config.replicas.as_ref().lock() {
+                    Ok(rep) => rep,
+                    Err(e) => {
+                        return Err(anyhow!("Failed to add replica: {}", e));
+                    }
+                };
+
+                replicas.add_peer(peer, sender);
+
                 match raw_bytes {
                     Ok(bytes_written) => Ok(resp_bytes + bytes_written),
                     Err(e) => Err(anyhow!("Failed to write RDB payload bytes: {}", e)),

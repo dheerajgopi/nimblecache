@@ -11,6 +11,7 @@ use crate::server::info::ServerConfig;
 use crate::storage::store::Store;
 use anyhow::{anyhow, Error, Result};
 use bytes::BytesMut;
+use std::sync::Arc;
 use tokio::net::TcpStream;
 
 const EMPTY_ARGS: Vec<RespType> = vec![];
@@ -49,7 +50,7 @@ impl<'a> RespCommandHandler<'a> {
         stream: &'a mut TcpStream,
         buffer: BytesMut,
         store: &'a Store,
-        server_config: &'a ServerConfig,
+        server_config: Arc<ServerConfig>,
     ) -> Result<(RespCommandHandler<'a>, Vec<RespType>)> {
         // parse RESP value from the stream
         let mut buf = buffer.clone();
@@ -81,7 +82,7 @@ impl<'a> RespCommandHandler<'a> {
             "PING" => RespCommandHandler::PING(Ping::new(stream)),
             "SET" => RespCommandHandler::SET(Set::new(stream, store)),
             "REPLCONF" => RespCommandHandler::REPLCONF(Replconf::new(stream)),
-            "PSYNC" => RespCommandHandler::PSYNC(Psync::new(stream, server_config)),
+            "PSYNC" => RespCommandHandler::PSYNC(Psync::new(stream, Arc::clone(&server_config))),
             _ => return Err(anyhow!("Unknown command: {}", cmd_name)),
         };
 

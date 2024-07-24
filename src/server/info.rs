@@ -1,6 +1,10 @@
-use crate::cli::args::Args;
+use std::sync::{Arc, Mutex};
+
 use anyhow::{anyhow, Result};
 use rand::distributions::{Alphanumeric, DistString};
+
+use crate::cli::args::Args;
+use crate::replication::peer::Replica;
 
 /// Struct to store server information
 #[derive(Clone)]
@@ -9,6 +13,8 @@ pub struct ServerConfig {
     pub port: u16,
     pub replication: Replication,
     pub master: Option<Master>,
+    // pub replicas: Arc<Mutex<Vec<Replica>>>,
+    pub replicas: Arc<Mutex<Replica>>,
 }
 
 impl ServerConfig {
@@ -45,8 +51,17 @@ impl ServerConfig {
                 offset: 0,
             },
             master,
+            // replicas: Arc::new(Mutex::new(vec![])),
+            replicas: Arc::new(Mutex::new(Replica::new())),
         })
     }
+
+    // pub fn add_replica(&mut self, peer: Peer, sender: UnboundedSender<RespType>) {
+    //     self.replicas.add_peer(peer, sender);
+    // }
+    // pub fn add_replica(&self, replica: Replica, sender: Sender<RespType>) -> bool {
+    //     self.replicas.in
+    // }
 
     fn parse_host_port(host_port_str: String) -> Result<(String, u16)> {
         let mut split = host_port_str.split_whitespace();
@@ -116,7 +131,7 @@ pub struct Master {
 }
 
 /// Role assumed by the server
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub enum Role {
     /// Master role.
     MASTER,

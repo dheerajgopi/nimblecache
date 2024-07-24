@@ -5,7 +5,7 @@ use crate::replication::handshake;
 use crate::server::info::{Role, ServerConfig};
 use crate::storage::store::Store;
 use bytes::BytesMut;
-use log::{info, warn};
+use log::{error, info, warn};
 use std::sync::Arc;
 use tokio::net::TcpListener;
 
@@ -15,34 +15,26 @@ const EMPTY_ARGS: Vec<RespType> = vec![];
 pub struct TcpServer<'a> {
     /// Arguments to be passed while instantiating the server.
     args: &'a Args,
-    cfg: ServerConfig,
+    // cfg: &'a ServerConfig,
 }
 
 impl<'a> TcpServer<'a> {
-    pub fn new(args: &Args) -> TcpServer {
-        let srv_cfg = ServerConfig::new(args);
-        let srv_cfg = match srv_cfg {
-            Ok(si) => si,
-            Err(e) => {
-                panic!("Error while initializing server {}", e)
-            }
-        };
-
-        TcpServer { args, cfg: srv_cfg }
+    pub fn new(args: &'a Args) -> TcpServer<'a> {
+        TcpServer { args }
     }
 
     /// Start listening to the post specified in the program arguments [Self::Args].
     /// If no ports are specified, it will default to port 6379.
-    pub async fn start(self) {
-        let server_config = self.cfg.clone();
+    pub async fn start(&self, cfg: Arc<ServerConfig>) {
+        let server_config = cfg.as_ref();
         let role = server_config.role;
-        let master = server_config.master;
+        let master = &server_config.master;
         match role {
             Role::MASTER => {
                 info!("Assuming role as master");
             }
             Role::SLAVE => {
-                let master = &master.unwrap();
+                let master = master.as_ref().unwrap();
                 info!("Assuming role as slave of {}:{}", master.host, master.port);
 
                 // Replica server (slave) should perform handshake with master
@@ -57,7 +49,7 @@ impl<'a> TcpServer<'a> {
             }
         }
 
-        let server_config_arc = Arc::new(self.cfg.clone());
+        let server_config_arc = Arc::clone(&cfg);
 
         let addr = format!("127.0.0.1:{}", self.args.port);
         info!("Starting TCP listener on port {}", self.args.port);
@@ -85,7 +77,7 @@ impl<'a> TcpServer<'a> {
                                 &mut stream,
                                 buffer,
                                 Arc::as_ref(&storage_arc),
-                                Arc::as_ref(&server_config_arc),
+                                server_config_arc.clone(),
                             )
                             .await;
                             let (mut resp_handler, args) = match resp_handler {
@@ -98,13 +90,18 @@ impl<'a> TcpServer<'a> {
 
                             // NULL handler is used to skip the loop in case 0 bytes are read from the stream
                             match resp_handler {
-                                RespCommandHandler::NULL => continue,
+                                RespCommandHandler::NULL => break,
                                 _ => {}
                             }
 
                             let args = args.iter().map(|a| a).collect::<Vec<&RespType>>();
                             let args = args.as_slice();
-                            resp_handler.handle(args).await.unwrap();
+                            match resp_handler.handle(args).await {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    error!("error while handling RESP command: {}", e);
+                                }
+                            };
                         }
                     });
                 }

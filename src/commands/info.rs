@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use crate::protocol::resp::types::RespType;
 use crate::protocol::resp::types::RespType::SimpleError;
 use crate::{commands::traits::CommandExecutor, server::info::ServerConfig};
@@ -13,12 +15,12 @@ const ALL_INFO_ARGS: [InfoArg; 1] = [InfoArg::REPLICATION];
 pub struct Info<'a> {
     stream: &'a mut TcpStream,
     /// Used to fetch server info
-    server_config: &'a ServerConfig,
+    server_config: Arc<ServerConfig>,
 }
 
 impl<'a> Info<'a> {
     /// Create new Info command struct
-    pub fn new(stream: &'a mut TcpStream, server_config: &'a ServerConfig) -> Info<'a> {
+    pub fn new(stream: &'a mut TcpStream, server_config: Arc<ServerConfig>) -> Info<'a> {
         Info {
             stream,
             server_config,
@@ -54,10 +56,12 @@ impl<'a> CommandExecutor for Info<'a> {
         // append section infos in a loop
         let mut info = String::new();
 
+        let server_config = self.server_config.as_ref();
+
         for info_arg in info_args {
             let section = match info_arg {
                 InfoArg::REPLICATION => {
-                    format!("# Replication\n{}\n", self.server_config.info_replication())
+                    format!("# Replication\n{}\n", server_config.info_replication())
                 }
             };
 

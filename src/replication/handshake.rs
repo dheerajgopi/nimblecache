@@ -23,7 +23,7 @@ impl Handshake {
     /// Step 2: Send 2 REPLCONF commands to master - `REPLCONF listening-port <PORT>` and `REPLCONF capa psync2`,
     ///         where `<PORT>` is the port where the replica is listening.
     ///
-    /// Step: Send PSYNC <REPLICATION_ID> <OFFSET> command to master.
+    /// Step 3: Send PSYNC <REPLICATION_ID> <OFFSET> command to master.
     pub async fn start(master: Master) -> Result<()> {
         // get master host and port
         let (master_host, master_port) = (master.host, master.port);
@@ -141,6 +141,13 @@ impl Handshake {
             Err(e) => {
                 return Err(e);
             }
+        }
+
+        // flush stream
+        let flush = stream.flush().await;
+        match flush {
+            Ok(_) => {}
+            Err(e) => return Err(anyhow!("Handshake failed with error: {}", e)),
         }
 
         return Ok(());
