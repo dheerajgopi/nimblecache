@@ -6,7 +6,6 @@ use crate::server::info::{Role, ServerConfig};
 use anyhow::anyhow;
 use bytes::BytesMut;
 use std::sync::Arc;
-use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -111,21 +110,17 @@ impl<'a> CommandHandler for Psync<'a> {
     async fn handle(&mut self, args: &[&RespType]) -> anyhow::Result<usize> {
         let svr_config = self.server_config.as_ref();
         let (res, payload_bytes) = self.execute(args);
-        let resp_bytes = RespType::write_to_stream(self.stream, &res).await;
-        let resp_bytes = match resp_bytes {
-            Ok(b) => b,
-            Err(_) => return Err(anyhow!("Failed to write data into response stream")),
-        };
 
-        match payload_bytes {
-            None => Ok(resp_bytes),
-            Some(b) => {
+        let mut byte_data = BytesMut::from(res.serialize().as_bytes());
+        byte_data.extend_from_slice(payload_bytes.unwrap().as_ref());
+        let bytes_written = RespType::write_bytes_to_stream(self.stream, &byte_data).await;
+
+        match bytes_written {
+            Ok(b) => {
                 let peer_socket = self.stream.peer_addr().unwrap();
                 // let peer_ip = peer_socket.ip();
                 // let peer_port: u16 = 6380;
                 // let peer_stream = TcpStream::connect(format!("{}:{}", peer_ip, peer_port)).await.unwrap();
-
-                let raw_bytes = self.stream.write(b.as_ref()).await;
 
                 let peer = Peer::new(peer_socket);
                 let (sender, _) = unbounded_channel::<RespType>();
@@ -139,11 +134,9 @@ impl<'a> CommandHandler for Psync<'a> {
 
                 replicas.add_peer(peer, sender);
 
-                match raw_bytes {
-                    Ok(bytes_written) => Ok(resp_bytes + bytes_written),
-                    Err(e) => Err(anyhow!("Failed to write RDB payload bytes: {}", e)),
-                }
-            }
+                Ok(b)
+            },
+            Err(_) => return Err(anyhow!("Failed to write data into response stream")),
         }
     }
 }

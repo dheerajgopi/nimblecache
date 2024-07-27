@@ -83,6 +83,14 @@ impl RespType {
         Ok(bytes_written)
     }
 
+    /// Writes raw bytes into a TCP stream.
+    pub async fn write_bytes_to_stream(stream: &mut TcpStream, bytes: &[u8]) -> Result<usize> {
+        match stream.write(bytes).await {
+            Ok(b) => Ok(b),
+            Err(e) => Err(anyhow!("Error writing to TCP stream: {}", e)),
+        }
+    }
+
     /// Parse the given bytes into a SimpleString RESP value. This will return the parsed RESP
     /// value and the number of bytes read from the buffer.
     ///
