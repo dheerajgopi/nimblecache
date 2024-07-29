@@ -29,6 +29,16 @@ impl<'a> TcpServer<'a> {
         let server_config = cfg.as_ref();
         let role = server_config.role;
         let master = &server_config.master;
+
+        let server_config_arc = Arc::clone(&cfg);
+
+        let addr = format!("127.0.0.1:{}", self.args.port);
+        info!("Starting TCP listener on port {}", self.args.port);
+
+        let listener = TcpListener::bind(addr).await.unwrap();
+        let storage = Store::new_simple_map();
+        let storage_arc = Arc::new(storage);
+
         match role {
             Role::MASTER => {
                 info!("Assuming role as master");
@@ -36,6 +46,11 @@ impl<'a> TcpServer<'a> {
             Role::SLAVE => {
                 let master = master.as_ref().unwrap();
                 info!("Assuming role as slave of {}:{}", master.host, master.port);
+
+                // TODO:
+                // - handshake should return the master stream
+                // - pass the stream to a master listener struct
+                // - master listener struct should spawn a task which listens to requests
 
                 // Replica server (slave) should perform handshake with master
                 match handshake::Handshake::start(master.clone()).await {
@@ -48,15 +63,6 @@ impl<'a> TcpServer<'a> {
                 };
             }
         }
-
-        let server_config_arc = Arc::clone(&cfg);
-
-        let addr = format!("127.0.0.1:{}", self.args.port);
-        info!("Starting TCP listener on port {}", self.args.port);
-
-        let listener = TcpListener::bind(addr).await.unwrap();
-        let storage = Store::new_simple_map();
-        let storage_arc = Arc::new(storage);
 
         loop {
             let stream = listener.accept().await;

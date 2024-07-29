@@ -24,7 +24,7 @@ impl Handshake {
     ///         where `<PORT>` is the port where the replica is listening.
     ///
     /// Step 3: Send PSYNC <REPLICATION_ID> <OFFSET> command to master.
-    pub async fn start(master: Master) -> Result<()> {
+    pub async fn start(master: Master) -> Result<TcpStream> {
         // get master host and port
         let (master_host, master_port) = (master.host, master.port);
 
@@ -150,7 +150,7 @@ impl Handshake {
             Err(e) => return Err(anyhow!("Handshake failed with error: {}", e)),
         }
 
-        return Ok(());
+        return Ok(stream);
     }
 
     /// Send a PING command to master and return the response.
