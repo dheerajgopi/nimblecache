@@ -1,9 +1,10 @@
 use anyhow::{Error, Result};
+use futures::{SinkExt, StreamExt};
 use log::error;
-use tokio::{
-    io::AsyncWriteExt,
-    net::{TcpListener, TcpStream},
-};
+use tokio::net::{TcpListener, TcpStream};
+use tokio_util::codec::Framed;
+
+use crate::resp::frame::RespCommandFrame;
 
 #[derive(Debug)]
 pub struct Server {
@@ -25,10 +26,27 @@ impl Server {
                 }
             };
 
+            let mut resp_command_frame = Framed::new(sock, RespCommandFrame::new());
+
             tokio::spawn(async move {
-                if let Err(e) = &mut sock.write_all("Hello!".as_bytes()).await {
-                    error!("{}", e);
-                    panic!("Error writing response")
+                while let Some(resp_cmd) = resp_command_frame.next().await {
+                    match resp_cmd {
+                        Ok(cmd) => {
+                            if let Err(e) = resp_command_frame.send(cmd).await {
+                                error!("Error sending response: {}", e);
+                                break;
+                            }
+                        }
+                        Err(e) => {
+                            error!("Error reading the request: {}", e);
+                            break;
+                        }
+                    };
+
+                    match resp_command_frame.flush().await {
+                        Ok(_) => {}
+                        Err(_) => {}
+                    };
                 }
             });
         }
