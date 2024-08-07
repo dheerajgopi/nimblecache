@@ -1,15 +1,18 @@
 use core::fmt;
 
+use info::Info;
 use ping::Ping;
 
 use crate::resp::types::RespType;
 
+mod info;
 mod ping;
 
 /// Represents the supported Nimblecache commands.
 pub enum Command {
     /// The PING command.
     Ping(Ping),
+    Info(Info),
 }
 
 impl Command {
@@ -33,6 +36,7 @@ impl Command {
 
         let cmd = match cmd_name.to_lowercase().as_str() {
             "ping" => Command::Ping(Ping::with_args(Vec::from(args))?),
+            "info" => Command::Info(Info::with_args(Vec::from(args))?),
             _ => {
                 return Err(CommandError::UnknownCommand(ErrUnknownCommand {
                     cmd: cmd_name,
@@ -51,6 +55,7 @@ impl Command {
     pub fn execute(self) -> RespType {
         match self {
             Command::Ping(ping) => ping.apply(),
+            Command::Info(info) => info.apply(),
         }
     }
 }
