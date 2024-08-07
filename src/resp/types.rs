@@ -1,5 +1,6 @@
-use anyhow::{anyhow, Result};
 use bytes::{Bytes, BytesMut};
+
+use super::RespError;
 
 /// Nimblecache supports Redis Serialization Protocol or RESP.
 /// This enum is a wrapper for the different RESP types.
@@ -31,12 +32,12 @@ impl RespType {
     /// Error will be returned in the following scenarios:
     /// - If first byte is an invalid character.
     /// - If the parsing fails due to encoding issues etc.
-    pub fn parse(buffer: BytesMut) -> Result<(RespType, usize)> {
+    pub fn parse(buffer: BytesMut) -> Result<(RespType, usize), RespError> {
         let c = buffer[0] as char;
         return match c {
             '$' => Self::new_bulk_string(buffer),
             '*' => Self::new_array(buffer),
-            _ => Err(anyhow!("Invalid RESP data type {:?}", buffer)),
+            _ => Err(RespError::InvalidDataTypePrefix),
         };
     }
     /// Parse the given bytes into a BulkString RESP value. This will return the parsed RESP
@@ -58,27 +59,30 @@ impl RespType {
     ///
     /// Note: The first byte in the buffer is skipped since it's just an identifier for the
     /// RESP type and is not the part of the actual value itself.
-    pub fn new_bulk_string(buffer: BytesMut) -> Result<(RespType, usize)> {
+    pub fn new_bulk_string(buffer: BytesMut) -> Result<(RespType, usize), RespError> {
         let (bulkstr_len, bytes_consumed) =
             if let Some((buf_data, len)) = Self::read_till_crlf(&buffer[1..]) {
                 let bulkstr_len = Self::parse_usize_from_buf(buf_data)?;
                 (bulkstr_len, len + 1)
             } else {
-                return Err(anyhow!("Invalid value for bulk string {:?}", buffer));
+                return Err(RespError::InvalidBulkString(String::from(
+                    "Invalid value for bulk string",
+                )));
             };
 
         let bulkstr_end_idx = bytes_consumed + bulkstr_len as usize;
         if bulkstr_end_idx >= buffer.len() {
-            return Err(anyhow!(
-                "Improper bulk string length provided in {:?}",
-                buffer
-            ));
+            return Err(RespError::InvalidBulkString(String::from(
+                "Invalid value for bulk string length",
+            )));
         }
         let bulkstr = String::from_utf8(buffer[bytes_consumed..bulkstr_end_idx].to_vec());
 
         match bulkstr {
             Ok(bs) => Ok((RespType::BulkString(bs), bulkstr_end_idx + 2)),
-            Err(_) => Err(anyhow!("Invalid UTF-8 string {:?}", buffer)),
+            Err(_) => Err(RespError::InvalidBulkString(String::from(
+                "Bulk string value is not a valid UTF-8 string",
+            ))),
         }
     }
 
@@ -102,19 +106,23 @@ impl RespType {
     ///
     /// Note: The first byte in the buffer is skipped since it's just an identifier for the
     /// RESP type and is not the part of the actual value itself.
-    pub fn new_array(buffer: BytesMut) -> Result<(RespType, usize)> {
+    pub fn new_array(buffer: BytesMut) -> Result<(RespType, usize), RespError> {
         let (arr_len, mut bytes_consumed) =
             if let Some((buf_data, len)) = Self::read_till_crlf(&buffer[1..]) {
                 let arr_len = Self::parse_usize_from_buf(buf_data)?;
                 (arr_len, len + 1)
             } else {
-                return Err(anyhow!("Invalid value for array {:?}", buffer));
+                return Err(RespError::InvalidArray(String::from(
+                    "Invalid value for array",
+                )));
             };
 
         let mut items: Vec<RespType> = vec![];
         for _ in 0..arr_len {
             if bytes_consumed >= buffer.len() {
-                return Err(anyhow!("Improper array length provided in {:?}", buffer));
+                return Err(RespError::InvalidArray(String::from(
+                    "Invalid value for array length",
+                )));
             }
             let item = Self::parse(BytesMut::from(&buffer[bytes_consumed..]));
             match item {
@@ -132,6 +140,7 @@ impl RespType {
     /// Convert the RESP value into its byte values.
     pub fn to_bytes(&self) -> Bytes {
         return match self {
+            RespType::SimpleString(ss) => Bytes::from_iter(format!("+{}\r\n", ss).into_bytes()),
             RespType::BulkString(bs) => {
                 let bulkstr_bytes = format!("${}\r\n{}\r\n", bs.chars().count(), bs).into_bytes();
                 Bytes::from_iter(bulkstr_bytes)
@@ -144,6 +153,7 @@ impl RespType {
 
                 Bytes::from_iter(arr_bytes)
             }
+            RespType::SimpleError(es) => Bytes::from_iter(format!("-{}\r\n", es).into_bytes()),
             _ => unimplemented!(),
         };
     }
@@ -163,15 +173,17 @@ impl RespType {
     ///   - The parsed length of the array
     ///   - The number of bytes read from the input
     /// * `Ok(None)` - If there's not enough data in the buffer to parse the length
-    /// * `Err(anyhow::Error)` - If the input is not a valid RESP array prefix or if parsing fails
-    pub fn parse_array_len(src: BytesMut) -> Result<Option<(usize, usize)>> {
+    /// * `Err(RespError)` - If the input is not a valid RESP array prefix or if parsing fails
+    pub fn parse_array_len(src: BytesMut) -> Result<Option<(usize, usize)>, RespError> {
         let (array_prefix_bytes, bytes_read) = match Self::read_till_crlf(&src[..]) {
             Some((b, size)) => (b, size),
             None => return Ok(None),
         };
 
         if bytes_read < 4 || array_prefix_bytes[0] as char != '*' {
-            return Err(anyhow!("Not a valid RESP array"));
+            return Err(RespError::InvalidArray(String::from(
+                "Not a valid RESP array",
+            )));
         }
 
         match Self::parse_usize_from_buf(&array_prefix_bytes[1..]) {
@@ -195,16 +207,18 @@ impl RespType {
     ///   - The parsed length of the bulk string
     ///   - The number of bytes read from the input
     /// * `Ok(None)` - If there's not enough data in the buffer to parse the length
-    /// * `Err(anyhow::Error)` - If the input is not a valid RESP bulk string prefix or if parsing fails
+    /// * `Err(RespError)` - If the input is not a valid RESP bulk string prefix or if parsing fails
     ///
-    pub fn parse_bulk_string_len(src: BytesMut) -> Result<Option<(usize, usize)>> {
+    pub fn parse_bulk_string_len(src: BytesMut) -> Result<Option<(usize, usize)>, RespError> {
         let (bulkstr_prefix_bytes, bytes_read) = match Self::read_till_crlf(&src[..]) {
             Some((b, size)) => (b, size),
             None => return Ok(None),
         };
 
         if bytes_read < 4 || bulkstr_prefix_bytes[0] as char != '$' {
-            return Err(anyhow!("Not a valid RESP bulk string"));
+            return Err(RespError::InvalidBulkString(String::from(
+                "Not a valid RESP bulk string",
+            )));
         }
 
         match Self::parse_usize_from_buf(&bulkstr_prefix_bytes[1..]) {
@@ -225,17 +239,19 @@ impl RespType {
     }
 
     // Parse an integer from bytes
-    fn parse_usize_from_buf(buf: &[u8]) -> Result<usize> {
+    fn parse_usize_from_buf(buf: &[u8]) -> Result<usize, RespError> {
         let utf8_str = String::from_utf8(buf.to_vec());
         let parsed_int = match utf8_str {
             Ok(s) => {
                 let int = s.parse::<usize>();
                 match int {
                     Ok(n) => Ok(n),
-                    Err(_) => Err(anyhow!("Invalid value for an integer {:?}", s)),
+                    Err(_) => Err(RespError::Other(String::from(
+                        "Invalid value for an integer",
+                    ))),
                 }
             }
-            Err(_) => Err(anyhow!("Invalid UTF-8 string {:?}", buf)),
+            Err(_) => Err(RespError::Other(String::from("Invalid UTF-8 string"))),
         };
 
         parsed_int

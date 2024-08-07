@@ -5,6 +5,8 @@ use tokio_util::codec::{Decoder, Encoder};
 
 use crate::resp::types::RespType;
 
+use super::RespError;
+
 /// A tokio_utils Frame codec for working with TCP streams as a `Sink` and `Stream` of `RespType`.
 ///
 /// This codec specifically handles Nimblecache commands, which are always represented
@@ -42,11 +44,11 @@ impl RespCommandFrame {
 }
 
 impl Decoder for RespCommandFrame {
-    type Item = RespType;
+    type Item = Vec<RespType>;
 
     type Error = std::io::Error;
 
-    /// Decodes bytes from the input stream into a `RespType` representing a Nimblecache command.
+    /// Decodes bytes from the input stream into a `Vec<RespType>` representing a Nimblecache command.
     ///
     /// This method implements the RESP protocol decoding logic, specifically handling
     /// arrays of bulk strings which represent Nimblecache commands. It uses a `CommandBuilder`
@@ -58,7 +60,7 @@ impl Decoder for RespCommandFrame {
     ///
     /// # Returns
     ///
-    /// * `Ok(Some(RespType))` if a complete command (array of bulk strings) was successfully decoded.
+    /// * `Ok(Some(Vec<RespType>))` if a complete command (array of bulk strings) was successfully decoded.
     /// * `Ok(None)` if more data is needed to complete the command.
     /// * `Err(std::io::Error)` if an error occurred during decoding.
     fn decode(
@@ -76,7 +78,7 @@ impl Decoder for RespCommandFrame {
                 Err(e) => {
                     return Err(Error::new(
                         std::io::ErrorKind::InvalidData,
-                        FrameError::Other(e),
+                        FrameError::from(e),
                     ));
                 }
             };
@@ -99,7 +101,7 @@ impl Decoder for RespCommandFrame {
                 Err(e) => {
                     return Err(Error::new(
                         std::io::ErrorKind::InvalidData,
-                        FrameError::Other(e),
+                        FrameError::from(e),
                     ));
                 }
             };
@@ -121,7 +123,7 @@ impl Decoder for RespCommandFrame {
                 Err(e) => {
                     return Err(Error::new(
                         std::io::ErrorKind::InvalidData,
-                        FrameError::Other(e),
+                        FrameError::from(e),
                     ));
                 }
             };
@@ -168,7 +170,7 @@ impl Encoder<RespType> for RespCommandFrame {
     }
 }
 
-/// This struct is used to accumulate the parts of a Redis command, which are
+/// This struct is used to accumulate the parts of a Nimblecache command, which are
 /// typically represented as an array of bulk strings in the RESP protocol.
 struct CommandBuilder {
     parts: Vec<RespType>,
@@ -206,34 +208,32 @@ impl CommandBuilder {
         self.num_parts == self.parts_parsed
     }
 
-    /// Builds and returns the complete command as a RESP array.
+    /// Builds and returns the complete command as a vector of RESP values.
     ///
     /// # Returns
     ///
-    /// A `RespType::Array` containing all the parts of the command.
-    pub fn build(&self) -> RespType {
-        RespType::Array(self.parts.clone())
+    /// A vector of `RespType` containing all the parts of the command.
+    pub fn build(&self) -> Vec<RespType> {
+        self.parts.clone()
     }
 }
 
-/// Represents errors that can occur during RESP command frame parsing.
+/// Represents error that can occur during RESP command frame parsing.
 #[derive(Debug)]
-pub enum FrameError {
-    /// Indicates that the stream doesn't contain enough data to complete parsing.
-    ///
-    /// This variant is used when more data is needed to fully parse a frame.
-    Incomplete,
-    /// Represents any other error that may occur during frame parsing.
-    Other(anyhow::Error),
+pub struct FrameError {
+    err: RespError,
+}
+
+impl FrameError {
+    pub fn from(err: RespError) -> FrameError {
+        FrameError { err }
+    }
 }
 
 impl std::error::Error for FrameError {}
 
 impl fmt::Display for FrameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FrameError::Incomplete => "incomplete stream".fmt(f),
-            FrameError::Other(e) => e.fmt(f),
-        }
+        self.err.fmt(f)
     }
 }

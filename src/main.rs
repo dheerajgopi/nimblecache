@@ -1,3 +1,5 @@
+mod command;
+mod handler;
 mod resp;
 mod server;
 
@@ -20,13 +22,12 @@ async fn main() -> Result<()> {
 
     let mut server = Server::new(listener);
     tokio::select! {
-        res = server.run() => {
+        res = server.listen() => {
             if let Err(err) = res {
-                error!("failed to accept request: {}", err);
+                error!("failed to process the request: {}", err);
             }
         }
     }
-    server.run().await?;
 
     Ok(())
 }
