@@ -145,6 +145,7 @@ impl RespType {
                 let bulkstr_bytes = format!("${}\r\n{}\r\n", bs.chars().count(), bs).into_bytes();
                 Bytes::from_iter(bulkstr_bytes)
             }
+            RespType::NullBulkString => Bytes::from("$-1\r\n"),
             RespType::Array(arr) => {
                 let mut arr_bytes = format!("*{}\r\n", arr.len()).into_bytes();
                 arr.iter()

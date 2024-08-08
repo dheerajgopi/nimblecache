@@ -7,12 +7,19 @@ use crate::resp::types::RespType;
 
 mod info;
 mod ping;
+pub mod pipelining;
 
 /// Represents the supported Nimblecache commands.
+#[derive(Debug, Clone)]
 pub enum Command {
     /// The PING command.
     Ping(Ping),
+    /// The INFO command.
     Info(Info),
+    /// The MULTI command.
+    Multi,
+    /// The EXEC command.
+    Exec,
 }
 
 impl Command {
@@ -37,6 +44,8 @@ impl Command {
         let cmd = match cmd_name.to_lowercase().as_str() {
             "ping" => Command::Ping(Ping::with_args(Vec::from(args))?),
             "info" => Command::Info(Info::with_args(Vec::from(args))?),
+            "multi" => Command::Multi,
+            "exec" => Command::Exec,
             _ => {
                 return Err(CommandError::UnknownCommand(ErrUnknownCommand {
                     cmd: cmd_name,
@@ -52,10 +61,14 @@ impl Command {
     /// # Returns
     ///
     /// The result of the command execution as a `RespType`.
-    pub fn execute(self) -> RespType {
+    pub fn execute(&self) -> RespType {
         match self {
             Command::Ping(ping) => ping.apply(),
             Command::Info(info) => info.apply(),
+            // MULTI calls are handled inside FrameHandler.handle since it involves command queueing.
+            Command::Multi => RespType::SimpleString(String::from("OK")),
+            // EXEC calls are handled inside FrameHandler.handle too, since it involves executing queued commands.
+            Command::Exec => RespType::NullBulkString,
         }
     }
 }

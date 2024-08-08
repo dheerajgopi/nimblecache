@@ -4,6 +4,7 @@ use log::error;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
+use crate::command::pipelining::MultiCommand;
 use crate::resp::types::RespType;
 use crate::{command::Command, resp::frame::RespCommandFrame};
 
@@ -24,6 +25,20 @@ impl FrameHandler {
     /// processes them, and sends back the responses. It continues until
     /// an error occurs or the connection is closed.
     ///
+    /// The server's behavior depends on whether a `MULTI` command has been issued.
+    ///
+    /// ## No MULTI Command Issued
+    ///
+    /// If no `MULTI` command has been issued, each command is executed
+    /// immediately and its response is sent back.
+    ///
+    /// ## MULTI Command Issued
+    ///
+    /// If a `MULTI` command has been issued, the method will enter a transaction
+    /// mode. In this mode, all subsequent commands will be queued until an
+    /// `EXEC` command is received. When `EXEC` is called, all the queued
+    /// commands are executed, and the array of responses is sent back.
+    ///
     /// # Returns
     ///
     /// A `Result` indicating whether the operation succeeded or failed.
@@ -33,6 +48,9 @@ impl FrameHandler {
     /// This method will return an error if there's an issue with reading
     /// from or writing to the connection.
     pub async fn handle(mut self) -> Result<()> {
+        // commands are queued here if MULTI command was issued
+        let mut multicommand = MultiCommand::new();
+
         while let Some(resp_cmd) = self.conn.next().await {
             match resp_cmd {
                 Ok(cmd_frame) => {
@@ -42,8 +60,39 @@ impl FrameHandler {
                     // If command is parsed successfully, execute it and get the RESP response,
                     // otherwise set a SimpleError RESP value as the response.
                     let response = match resp_cmd {
-                        Ok(cmd) => cmd.execute(),
-                        Err(e) => RespType::SimpleError(format!("{}", e)),
+                        Ok(cmd) => match cmd {
+                            // Initialize pipeline if MULTI command is issued
+                            Command::Multi => {
+                                let init_multicommand = &mut multicommand.init();
+                                match init_multicommand {
+                                    Ok(_) => cmd.execute(),
+                                    Err(e) => RespType::SimpleError(format!("{}", e)),
+                                }
+                            }
+                            // Execute all commands in pipeline if EXEC command is issued
+                            Command::Exec => {
+                                if multicommand.is_active() {
+                                    multicommand.exec()
+                                } else {
+                                    RespType::SimpleError(String::from("EXEC without MULTI"))
+                                }
+                            }
+                            _ => {
+                                // Queue commands if pipeline is active, else execute the command
+                                if multicommand.is_active() {
+                                    multicommand.add_command(cmd);
+                                    RespType::SimpleString(String::from("QUEUED"))
+                                } else {
+                                    cmd.execute()
+                                }
+                            }
+                        },
+                        Err(e) => {
+                            if multicommand.is_active() {
+                                multicommand.discard();
+                            }
+                            RespType::SimpleError(format!("{}", e))
+                        }
                     };
 
                     // Write the RESP response into the TCP stream.

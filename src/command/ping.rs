@@ -3,6 +3,7 @@ use crate::resp::types::RespType;
 use super::CommandError;
 
 /// Represents the PING command in Nimblecache.
+#[derive(Debug, Clone)]
 pub struct Ping {
     /// Custom message
     msg: Option<String>,
@@ -39,9 +40,9 @@ impl Ping {
     /// A `RespType` representing the response:
     /// - If no message was provided, it returns "PONG" as a `SimpleString`.
     /// - If a message was provided, it returns that message as a `BulkString`.
-    pub fn apply(self) -> RespType {
-        if let Some(msg) = self.msg {
-            RespType::BulkString(msg)
+    pub fn apply(&self) -> RespType {
+        if let Some(msg) = &self.msg {
+            RespType::BulkString(msg.to_string())
         } else {
             RespType::SimpleString(String::from("PONG"))
         }

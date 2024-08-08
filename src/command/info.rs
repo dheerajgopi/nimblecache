@@ -3,6 +3,7 @@ use crate::resp::types::RespType;
 use super::CommandError;
 
 /// Represents the INFO command in Nimblecache.
+#[derive(Debug, Clone)]
 pub struct Info {}
 
 impl Info {
@@ -21,7 +22,7 @@ impl Info {
     /// # Returns
     ///
     /// Returns a `BulkString` with server info.
-    pub fn apply(self) -> RespType {
+    pub fn apply(&self) -> RespType {
         RespType::BulkString(String::from("role:master\n"))
     }
 }
