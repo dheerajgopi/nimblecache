@@ -41,7 +41,7 @@ impl Server {
                 }
             };
 
-            let resp_command_frame = Framed::new(sock, RespCommandFrame::new());
+            let resp_command_frame = Framed::with_capacity(sock, RespCommandFrame::new(), 8 * 1024);
 
             tokio::spawn(async move {
                 let handler = FrameHandler::new(resp_command_frame);
