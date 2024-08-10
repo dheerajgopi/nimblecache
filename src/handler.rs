@@ -6,6 +6,7 @@ use tokio_util::codec::Framed;
 
 use crate::command::pipelining::MultiCommand;
 use crate::resp::types::RespType;
+use crate::storage::db::DB;
 use crate::{command::Command, resp::frame::RespCommandFrame};
 
 /// Handles RESP command frames over a single TCP connection.
@@ -39,6 +40,10 @@ impl FrameHandler {
     /// `EXEC` command is received. When `EXEC` is called, all the queued
     /// commands are executed, and the array of responses is sent back.
     ///
+    /// # Arguments
+    ///
+    /// * `db` - The database where the key and values are stored.
+    ///
     /// # Returns
     ///
     /// A `Result` indicating whether the operation succeeded or failed.
@@ -47,7 +52,7 @@ impl FrameHandler {
     ///
     /// This method will return an error if there's an issue with reading
     /// from or writing to the connection.
-    pub async fn handle(mut self) -> Result<()> {
+    pub async fn handle(mut self, db: &DB) -> Result<()> {
         // commands are queued here if MULTI command was issued
         let mut multicommand = MultiCommand::new();
 
@@ -65,14 +70,14 @@ impl FrameHandler {
                             Command::Multi => {
                                 let init_multicommand = &mut multicommand.init();
                                 match init_multicommand {
-                                    Ok(_) => cmd.execute(),
+                                    Ok(_) => cmd.execute(db),
                                     Err(e) => RespType::SimpleError(format!("{}", e)),
                                 }
                             }
                             // Execute all commands in pipeline if EXEC command is issued
                             Command::Exec => {
                                 if multicommand.is_active() {
-                                    multicommand.exec()
+                                    multicommand.exec(db)
                                 } else {
                                     RespType::SimpleError(String::from("EXEC without MULTI"))
                                 }
@@ -83,7 +88,7 @@ impl FrameHandler {
                                     multicommand.add_command(cmd);
                                     RespType::SimpleString(String::from("QUEUED"))
                                 } else {
-                                    cmd.execute()
+                                    cmd.execute(db)
                                 }
                             }
                         },

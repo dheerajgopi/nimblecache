@@ -37,9 +37,12 @@ async fn main() -> Result<()> {
         Err(e) => panic!("Could not bind the TCP listener to {}. Err: {}", &addr, e),
     };
 
+    // initialize storage
+    let shared_storage = storage::db::Storage::new(storage::db::DB::new());
+
     info!("Started TCP listener on port {}", port);
 
-    let mut server = Server::new(listener);
+    let mut server = Server::new(listener, shared_storage);
     tokio::select! {
         res = server.listen() => {
             if let Err(err) = res {

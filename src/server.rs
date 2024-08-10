@@ -1,21 +1,25 @@
+use std::sync::Arc;
+
 use anyhow::{Error, Result};
 use log::error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
 
-use crate::{handler::FrameHandler, resp::frame::RespCommandFrame};
+use crate::{handler::FrameHandler, resp::frame::RespCommandFrame, storage::db::Storage};
 
 /// Represents a TCP server that listens for and handles RESP commands.
 #[derive(Debug)]
 pub struct Server {
     /// The TCP listener for accepting incoming connections.
     listener: TcpListener,
+    /// Contains the storage.
+    storage: Storage,
 }
 
 impl Server {
     /// Creates a new `Server` instance.
-    pub fn new(listener: TcpListener) -> Server {
-        Server { listener }
+    pub fn new(listener: TcpListener, storage: Storage) -> Server {
+        Server { listener, storage }
     }
 
     /// Starts listening for incoming connections and handles them.
@@ -32,6 +36,7 @@ impl Server {
     /// This method will return an error if there's an issue with accepting connections.
     /// Note that it will panic if it encounters an error while accepting a connection.
     pub async fn listen(&mut self) -> Result<()> {
+        let db = self.storage.db().clone();
         loop {
             let sock = match self.accept_conn().await {
                 Ok(stream) => stream,
@@ -42,10 +47,11 @@ impl Server {
             };
 
             let resp_command_frame = Framed::with_capacity(sock, RespCommandFrame::new(), 8 * 1024);
+            let db = Arc::clone(&db);
 
             tokio::spawn(async move {
                 let handler = FrameHandler::new(resp_command_frame);
-                if let Err(e) = handler.handle().await {
+                if let Err(e) = handler.handle(db.as_ref()).await {
                     error!("Failed to handle command: {}", e);
                 }
             });

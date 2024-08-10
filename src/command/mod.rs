@@ -1,13 +1,17 @@
 use core::fmt;
 
+use get::Get;
 use info::Info;
 use ping::Ping;
+use set::Set;
 
-use crate::resp::types::RespType;
+use crate::{resp::types::RespType, storage::db::DB};
 
+mod get;
 mod info;
 mod ping;
 pub mod pipelining;
+mod set;
 
 /// Represents the supported Nimblecache commands.
 #[derive(Debug, Clone)]
@@ -20,6 +24,10 @@ pub enum Command {
     Multi,
     /// The EXEC command.
     Exec,
+    /// The SET command.
+    Set(Set),
+    /// The GET command.
+    Get(Get),
 }
 
 impl Command {
@@ -46,6 +54,20 @@ impl Command {
             "info" => Command::Info(Info::with_args(Vec::from(args))?),
             "multi" => Command::Multi,
             "exec" => Command::Exec,
+            "set" => {
+                let cmd = Set::with_args(Vec::from(args));
+                match cmd {
+                    Ok(cmd) => Command::Set(cmd),
+                    Err(e) => return Err(e),
+                }
+            }
+            "get" => {
+                let cmd = Get::with_args(Vec::from(args));
+                match cmd {
+                    Ok(cmd) => Command::Get(cmd),
+                    Err(e) => return Err(e),
+                }
+            }
             _ => {
                 return Err(CommandError::UnknownCommand(ErrUnknownCommand {
                     cmd: cmd_name,
@@ -58,10 +80,14 @@ impl Command {
 
     /// Executes the Nimblecache command.
     ///
+    /// # Arguments
+    ///
+    /// * `db` - The database where the key and values are stored.
+    ///
     /// # Returns
     ///
     /// The result of the command execution as a `RespType`.
-    pub fn execute(&self) -> RespType {
+    pub fn execute(&self, db: &DB) -> RespType {
         match self {
             Command::Ping(ping) => ping.apply(),
             Command::Info(info) => info.apply(),
@@ -69,6 +95,8 @@ impl Command {
             Command::Multi => RespType::SimpleString(String::from("OK")),
             // EXEC calls are handled inside FrameHandler.handle too, since it involves executing queued commands.
             Command::Exec => RespType::NullBulkString,
+            Command::Set(set) => set.apply(db),
+            Command::Get(get) => get.apply(db),
         }
     }
 }

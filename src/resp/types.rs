@@ -21,25 +21,6 @@ pub enum RespType {
 }
 
 impl RespType {
-    /// Parse the given bytes into its respective RESP type and return the parsed RESP value and
-    /// the number of bytes read from the buffer.
-    ///
-    /// More details on the parsing logic is available at
-    /// <https://redis.io/docs/latest/develop/reference/protocol-spec/#resp-protocol-description>.
-    ///
-    /// # Errors
-    ///
-    /// Error will be returned in the following scenarios:
-    /// - If first byte is an invalid character.
-    /// - If the parsing fails due to encoding issues etc.
-    pub fn parse(buffer: BytesMut) -> Result<(RespType, usize), RespError> {
-        let c = buffer[0] as char;
-        return match c {
-            '$' => Self::new_bulk_string(buffer),
-            '*' => Self::new_array(buffer),
-            _ => Err(RespError::InvalidDataTypePrefix),
-        };
-    }
     /// Parse the given bytes into a BulkString RESP value. This will return the parsed RESP
     /// value and the number of bytes read from the buffer.
     ///
@@ -86,57 +67,6 @@ impl RespType {
         }
     }
 
-    /// Parse the given bytes into an Array RESP value. This will return the parsed RESP
-    /// value and the number of bytes read from the buffer.
-    ///
-    /// Example Array: `*2\r\n$3\r\nSan\r\n$9\r\nFrancisco\r\n`
-    ///
-    /// The above array is of length 2, and contains 2 BulkStrings.
-    ///
-    /// # Array Parts:
-    /// ```
-    ///     *      |      2       | \r\n |      $3\r\nSan\r\n      |    $9\r\nFrancisco\r\n
-    /// identifier | array length | CRLF | first item in the array | second item in the array
-    /// ```
-    ///
-    /// # Parsing Logic:
-    /// - The buffer is read until CRLF characters ("\r\n") are encountered.
-    /// - That slice of bytes are then parsed into an int. That will be the array length (let's say `arr_len`)
-    /// - [Self::parse] is called `arr_len` number of times on the remaining bytes of the buffer to parse each array item.
-    ///
-    /// Note: The first byte in the buffer is skipped since it's just an identifier for the
-    /// RESP type and is not the part of the actual value itself.
-    pub fn new_array(buffer: BytesMut) -> Result<(RespType, usize), RespError> {
-        let (arr_len, mut bytes_consumed) =
-            if let Some((buf_data, len)) = Self::read_till_crlf(&buffer[1..]) {
-                let arr_len = Self::parse_usize_from_buf(buf_data)?;
-                (arr_len, len + 1)
-            } else {
-                return Err(RespError::InvalidArray(String::from(
-                    "Invalid value for array",
-                )));
-            };
-
-        let mut items: Vec<RespType> = vec![];
-        for _ in 0..arr_len {
-            if bytes_consumed >= buffer.len() {
-                return Err(RespError::InvalidArray(String::from(
-                    "Invalid value for array length",
-                )));
-            }
-            let item = Self::parse(BytesMut::from(&buffer[bytes_consumed..]));
-            match item {
-                Ok((data, bytes_read)) => {
-                    items.push(data);
-                    bytes_consumed += bytes_read;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-
-        return Ok((RespType::Array(items), bytes_consumed));
-    }
-
     /// Convert the RESP value into its byte values.
     pub fn to_bytes(&self) -> Bytes {
         return match self {
@@ -155,7 +85,6 @@ impl RespType {
                 Bytes::from_iter(arr_bytes)
             }
             RespType::SimpleError(es) => Bytes::from_iter(format!("-{}\r\n", es).into_bytes()),
-            _ => unimplemented!(),
         };
     }
 
