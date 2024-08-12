@@ -216,6 +216,88 @@ impl DB {
             }
         }
     }
+
+    /// Returns the specified number of elements of the list stored at key, based on the start and stop indices.
+    /// These offsets can also be negative numbers indicating offsets starting at the end of the list.
+    /// For example, -1 is the last element of the list, -2 the penultimate, and so on.
+    /// Please note that the item at stop index is also included in the result.
+    ///
+    /// If the specified key is not found, an empty list is returned.
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - The key on which list is stored.
+    ///
+    /// * `start_idx` - The start index.
+    ///
+    /// * `stop_idx` - The end index.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Vec<String>)` - If values are retrieved successfully from the list.
+    /// * `Err(DBError)` - if key already exists and has non-list data.
+    pub fn lrange(&self, k: String, start_idx: i64, stop_idx: i64) -> Result<Vec<String>, DBError> {
+        let data = match self.data.lock() {
+            Ok(data) => data,
+            Err(e) => return Err(DBError::Other(format!("{}", e))),
+        };
+
+        let entry = match data.entries.get(k.as_str()) {
+            Some(entry) => entry,
+            None => return Ok(vec![]),
+        };
+
+        match &entry.value {
+            Value::List(l) => {
+                let l_len = l.len() as i64;
+                let (rounded_start_idx, rounded_stop_idx) =
+                    Self::round_list_indices(l_len, start_idx, stop_idx);
+                Ok(l.range(rounded_start_idx..rounded_stop_idx)
+                    .cloned()
+                    .collect())
+            }
+            _ => Err(DBError::WrongType),
+        }
+    }
+
+    /// Round index to 0, if the given index value is less than zero.
+    /// Round index to list length, if the given index value is greater then the list length.
+    fn round_list_index(list_len: i64, idx: i64) -> usize {
+        if idx < 0 {
+            let idx = list_len - idx.abs();
+            if idx < 0 {
+                return 0;
+            } else {
+                return idx as usize;
+            }
+        }
+
+        if idx >= list_len {
+            return (list_len - 1) as usize;
+        }
+
+        return idx as usize;
+    }
+
+    /// Round the start and stop indices using `Self::round_list_index` method and return them as
+    /// a tuple.
+    /// Special condition: If stop index is lower than start index, return (0, 0).
+    fn round_list_indices(list_len: i64, start_idx: i64, stop_idx: i64) -> (usize, usize) {
+        if stop_idx < start_idx {
+            return (0, 0);
+        }
+
+        let rounded_start_idx = Self::round_list_index(list_len, start_idx);
+        let rounded_stop_idx = Self::round_list_index(list_len, stop_idx);
+
+        if rounded_start_idx < rounded_stop_idx {
+            (rounded_start_idx, rounded_stop_idx + 1)
+        } else if rounded_stop_idx < rounded_start_idx {
+            (0, 0)
+        } else {
+            (rounded_start_idx, rounded_start_idx + 1)
+        }
+    }
 }
 
 impl Entry {

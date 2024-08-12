@@ -3,6 +3,7 @@ use core::fmt;
 use get::Get;
 use info::Info;
 use lpush::LPush;
+use lrange::LRange;
 use ping::Ping;
 use rpush::RPush;
 use set::Set;
@@ -12,6 +13,7 @@ use crate::{resp::types::RespType, storage::db::DB};
 mod get;
 mod info;
 mod lpush;
+mod lrange;
 mod ping;
 pub mod pipelining;
 mod rpush;
@@ -36,6 +38,8 @@ pub enum Command {
     LPush(LPush),
     /// The RPUSH command.
     RPush(RPush),
+    /// The LRANGE command.
+    LRange(LRange),
 }
 
 impl Command {
@@ -90,6 +94,13 @@ impl Command {
                     Err(e) => return Err(e),
                 }
             }
+            "lrange" => {
+                let cmd = LRange::with_args(Vec::from(args));
+                match cmd {
+                    Ok(cmd) => Command::LRange(cmd),
+                    Err(e) => return Err(e),
+                }
+            }
             _ => {
                 return Err(CommandError::UnknownCommand(ErrUnknownCommand {
                     cmd: cmd_name,
@@ -121,6 +132,7 @@ impl Command {
             Command::Get(get) => get.apply(db),
             Command::LPush(lpush) => lpush.apply(db),
             Command::RPush(rpush) => rpush.apply(db),
+            Command::LRange(lrange) => lrange.apply(db),
         }
     }
 }
