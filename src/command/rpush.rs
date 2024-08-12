@@ -2,15 +2,15 @@ use crate::{resp::types::RespType, storage::db::DB};
 
 use super::CommandError;
 
-/// Represents the LPUSH command in Nimblecache.
+/// Represents the RPUSH command in Nimblecache.
 #[derive(Debug, Clone)]
-pub struct LPush {
+pub struct RPush {
     key: String,
     value: String,
 }
 
-impl LPush {
-    /// Creates a new `LPUSH` instance from the given arguments.
+impl RPush {
+    /// Creates a new `RPUSH` instance from the given arguments.
     ///
     /// # Arguments
     ///
@@ -18,12 +18,12 @@ impl LPush {
     ///
     /// # Returns
     ///
-    /// * `Ok(LPush)` if parsing succeeds.
+    /// * `Ok(RPush)` if parsing succeeds.
     /// * `Err(CommandError)` if parsing fails.
-    pub fn with_args(args: Vec<RespType>) -> Result<LPush, CommandError> {
+    pub fn with_args(args: Vec<RespType>) -> Result<RPush, CommandError> {
         if args.len() < 2 {
             return Err(CommandError::Other(String::from(
-                "Wrong number of arguments specified for 'LPUSH' command",
+                "Wrong number of arguments specified for 'RPUSH' command",
             )));
         }
 
@@ -49,13 +49,13 @@ impl LPush {
             }
         };
 
-        Ok(LPush {
+        Ok(RPush {
             key: key.to_string(),
             value,
         })
     }
 
-    /// Executes the LPUSH command.
+    /// Executes the RPUSH command.
     ///
     /// # Arguments
     ///
@@ -65,7 +65,7 @@ impl LPush {
     ///
     /// It returns the length of the list if value is successfully written.
     pub fn apply(&self, db: &DB) -> RespType {
-        match db.lpush(self.key.clone(), self.value.clone()) {
+        match db.rpush(self.key.clone(), self.value.clone()) {
             Ok(len) => RespType::Integer(len as i64),
             Err(e) => RespType::SimpleError(format!("{}", e)),
         }

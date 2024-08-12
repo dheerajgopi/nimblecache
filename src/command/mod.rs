@@ -4,6 +4,7 @@ use get::Get;
 use info::Info;
 use lpush::LPush;
 use ping::Ping;
+use rpush::RPush;
 use set::Set;
 
 use crate::{resp::types::RespType, storage::db::DB};
@@ -13,6 +14,7 @@ mod info;
 mod lpush;
 mod ping;
 pub mod pipelining;
+mod rpush;
 mod set;
 
 /// Represents the supported Nimblecache commands.
@@ -32,6 +34,8 @@ pub enum Command {
     Get(Get),
     /// The LPUSH command.
     LPush(LPush),
+    /// The RPUSH command.
+    RPush(RPush),
 }
 
 impl Command {
@@ -79,6 +83,13 @@ impl Command {
                     Err(e) => return Err(e),
                 }
             }
+            "rpush" => {
+                let cmd = RPush::with_args(Vec::from(args));
+                match cmd {
+                    Ok(cmd) => Command::RPush(cmd),
+                    Err(e) => return Err(e),
+                }
+            }
             _ => {
                 return Err(CommandError::UnknownCommand(ErrUnknownCommand {
                     cmd: cmd_name,
@@ -109,6 +120,7 @@ impl Command {
             Command::Set(set) => set.apply(db),
             Command::Get(get) => get.apply(db),
             Command::LPush(lpush) => lpush.apply(db),
+            Command::RPush(rpush) => rpush.apply(db),
         }
     }
 }
