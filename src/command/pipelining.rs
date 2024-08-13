@@ -1,4 +1,4 @@
-use crate::{resp::types::RespType, storage::db::DB};
+use crate::{replication::Replication, resp::types::RespType, storage::db::DB};
 
 use super::Command;
 
@@ -58,14 +58,16 @@ impl MultiCommand {
     ///
     /// * `db` - The database where the key and values are stored.
     ///
+    /// * `replication` - Server replication.
+    ///
     /// # Returns
     ///
     /// A `RespType::Array` containing the responses for each command in the pipeline.
-    pub fn exec(&mut self, db: &DB) -> RespType {
+    pub fn exec(&mut self, db: &DB, replication: &Replication) -> RespType {
         let responses = self
             .commands
             .iter()
-            .map(|cmd| cmd.execute(db))
+            .map(|cmd| cmd.execute(db, replication))
             .collect::<Vec<RespType>>();
 
         self.discard();

@@ -5,7 +5,10 @@ use log::error;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::codec::Framed;
 
-use crate::{handler::FrameHandler, resp::frame::RespCommandFrame, storage::db::Storage};
+use crate::{
+    handler::FrameHandler, replication::Replication, resp::frame::RespCommandFrame,
+    storage::db::Storage,
+};
 
 /// Represents a TCP server that listens for and handles RESP commands.
 #[derive(Debug)]
@@ -14,12 +17,18 @@ pub struct Server {
     listener: TcpListener,
     /// Contains the storage.
     storage: Storage,
+    /// Contains the replication info.
+    replication: Replication,
 }
 
 impl Server {
     /// Creates a new `Server` instance.
-    pub fn new(listener: TcpListener, storage: Storage) -> Server {
-        Server { listener, storage }
+    pub fn new(listener: TcpListener, storage: Storage, replication: Replication) -> Server {
+        Server {
+            listener,
+            storage,
+            replication,
+        }
     }
 
     /// Starts listening for incoming connections and handles them.
@@ -37,6 +46,8 @@ impl Server {
     /// Note that it will panic if it encounters an error while accepting a connection.
     pub async fn listen(&mut self) -> Result<()> {
         let db = self.storage.db().clone();
+        let replication = Arc::new(self.replication.clone());
+
         loop {
             let sock = match self.accept_conn().await {
                 Ok(stream) => stream,
@@ -48,10 +59,11 @@ impl Server {
 
             let resp_command_frame = Framed::with_capacity(sock, RespCommandFrame::new(), 8 * 1024);
             let db = Arc::clone(&db);
+            let replication = Arc::clone(&replication);
 
             tokio::spawn(async move {
                 let handler = FrameHandler::new(resp_command_frame);
-                if let Err(e) = handler.handle(db.as_ref()).await {
+                if let Err(e) = handler.handle(db.as_ref(), replication.as_ref()).await {
                     error!("Failed to handle command: {}", e);
                 }
             });

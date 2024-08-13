@@ -8,7 +8,7 @@ use ping::Ping;
 use rpush::RPush;
 use set::Set;
 
-use crate::{resp::types::RespType, storage::db::DB};
+use crate::{replication::Replication, resp::types::RespType, storage::db::DB};
 
 mod get;
 mod info;
@@ -117,13 +117,15 @@ impl Command {
     ///
     /// * `db` - The database where the key and values are stored.
     ///
+    /// * `replication` - Server replication.
+    ///
     /// # Returns
     ///
     /// The result of the command execution as a `RespType`.
-    pub fn execute(&self, db: &DB) -> RespType {
+    pub fn execute(&self, db: &DB, replication: &Replication) -> RespType {
         match self {
             Command::Ping(ping) => ping.apply(),
-            Command::Info(info) => info.apply(),
+            Command::Info(info) => info.apply(replication),
             // MULTI calls are handled inside FrameHandler.handle since it involves command queueing.
             Command::Multi => RespType::SimpleString(String::from("OK")),
             // EXEC calls are handled inside FrameHandler.handle too, since it involves executing queued commands.
