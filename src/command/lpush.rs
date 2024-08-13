@@ -6,7 +6,7 @@ use super::CommandError;
 #[derive(Debug, Clone)]
 pub struct LPush {
     key: String,
-    value: String,
+    values: Vec<String>,
 }
 
 impl LPush {
@@ -38,20 +38,22 @@ impl LPush {
             }
         };
 
-        // parse value
-        let value = &args[1];
-        let value = match value {
-            RespType::BulkString(v) => v.to_string(),
-            _ => {
-                return Err(CommandError::Other(String::from(
-                    "Invalid argument. Value must be a bulk string",
-                )));
+        // parse values
+        let mut values: Vec<String> = vec![];
+        for arg in args[1..].iter() {
+            match arg {
+                RespType::BulkString(v) => values.push(v.to_string()),
+                _ => {
+                    return Err(CommandError::Other(String::from(
+                        "Invalid argument. Value must be a bulk string",
+                    )));
+                }
             }
-        };
+        }
 
         Ok(LPush {
             key: key.to_string(),
-            value,
+            values,
         })
     }
 
@@ -65,7 +67,7 @@ impl LPush {
     ///
     /// It returns the length of the list if value is successfully written.
     pub fn apply(&self, db: &DB) -> RespType {
-        match db.lpush(self.key.clone(), self.value.clone()) {
+        match db.lpush(self.key.clone(), self.values.clone()) {
             Ok(len) => RespType::Integer(len as i64),
             Err(e) => RespType::SimpleError(format!("{}", e)),
         }
