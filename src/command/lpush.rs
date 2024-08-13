@@ -72,4 +72,12 @@ impl LPush {
             Err(e) => RespType::SimpleError(format!("{}", e)),
         }
     }
+
+    pub fn build_command(&self) -> RespType {
+        RespType::Array(vec![
+            RespType::BulkString(String::from("LPUSH")),
+            RespType::BulkString(self.key.clone()),
+            RespType::BulkString(self.values.clone().join(" ")),
+        ])
+    }
 }

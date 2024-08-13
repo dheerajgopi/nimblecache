@@ -10,8 +10,8 @@ use anyhow::{anyhow, Result};
 use clap::Parser;
 use log::{error, info};
 use rand::distributions::{Alphanumeric, DistString};
-use replication::Replication;
-use tokio::net::TcpListener;
+use replication::{master::MasterServer, Replication};
+use tokio::net::{TcpListener, TcpStream};
 
 const DEFAULT_PORT: u16 = 6379;
 
@@ -44,16 +44,51 @@ async fn main() -> Result<()> {
         Err(e) => panic!("Could not bind the TCP listener to {}. Err: {}", &addr, e),
     };
 
+    // Generate a 40 character alphanumeric replication id.
+    // If server is started as a slave, try parsing the master host and port
     let replication_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 40);
+    let mut master_stream: Option<TcpStream> = None;
     let master_host_port = match cli.parse_master_host_port() {
         Ok(hp) => hp,
         Err(e) => panic!("{}", e),
     };
 
+    // Try connecting to master server.
+    // A panic can occur if the server fails to connect with the master server.
+    if let Some((host, port)) = master_host_port.clone() {
+        let master_addr = format!("{}:{}", host, port,);
+        master_stream = match TcpStream::connect(master_addr.clone()).await {
+            Ok(stream) => Some(stream),
+            Err(e) => {
+                error!("{}", e);
+                panic!("Failed to connect with master at {}", master_addr);
+            }
+        };
+    }
+
     let replication = Replication::new(replication_id, master_host_port);
 
     // initialize storage
     let shared_storage = storage::db::Storage::new(storage::db::DB::new());
+
+    // If slave server, initialize master server listener
+    if let Some(stream) = master_stream {
+        let stream = match MasterServer::perform_handshake(stream).await {
+            Ok(s) => s,
+            Err(e) => panic!("Handshake with master server failed with error: {}", e),
+        };
+        let master_svr_storage = shared_storage.clone();
+        let master_svr_replication = replication.clone();
+        tokio::spawn(async move {
+            tokio::select! {
+                res = MasterServer::listen(stream, master_svr_storage, master_svr_replication) => {
+                    if let Err(err) = res {
+                        error!("failed to process the request from master: {}", err);
+                    }
+                }
+            }
+        });
+    }
 
     info!("Started TCP listener on port {}", port);
 

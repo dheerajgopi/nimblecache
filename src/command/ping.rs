@@ -47,4 +47,8 @@ impl Ping {
             RespType::SimpleString(String::from("PONG"))
         }
     }
+
+    pub fn build_command() -> RespType {
+        RespType::Array(vec![RespType::BulkString(String::from("PING"))])
+    }
 }

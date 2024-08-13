@@ -171,6 +171,42 @@ impl RespType {
         None
     }
 
+    /// Parse the given bytes into a SimpleString RESP value. This will return the parsed RESP
+    /// value and the number of bytes read from the buffer.
+    ///
+    /// Example SimpleString: `+OK\r\n`
+    ///
+    /// # SimpleString Parts:
+    /// ```
+    ///      +      |      OK      | \r\n
+    ///  identifier | string value | CRLF
+    /// ```
+    ///
+    /// # Parsing Logic:
+    /// The buffer is read until CRLF characters ("\r\n") are encountered. That slice of bytes are then
+    /// parsed into an UTF-8 string.
+    ///
+    /// Note: The first byte in the buffer is skipped since it's just an identifier for the
+    /// RESP type and is not the part of the actual value itself.
+    pub fn new_simple_string(buffer: BytesMut) -> Result<(RespType, usize), RespError> {
+        if let Some((buf_data, len)) = Self::read_till_crlf(&buffer[1..]) {
+            let utf8_str = String::from_utf8(buf_data.to_vec());
+
+            return match utf8_str {
+                Ok(simple_str) => Ok((RespType::SimpleString(simple_str), len + 1)),
+                Err(_) => {
+                    return Err(RespError::InvalidSimpleString(String::from(
+                        "Simple string value is not a valid UTF-8 string",
+                    )))
+                }
+            };
+        }
+
+        Err(RespError::InvalidSimpleString(String::from(
+            "Invalid value for simple string",
+        )))
+    }
+
     // Parse an integer from bytes
     fn parse_usize_from_buf(buf: &[u8]) -> Result<usize, RespError> {
         let utf8_str = String::from_utf8(buf.to_vec());

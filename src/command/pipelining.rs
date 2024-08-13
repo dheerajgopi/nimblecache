@@ -63,13 +63,22 @@ impl MultiCommand {
     /// # Returns
     ///
     /// A `RespType::Array` containing the responses for each command in the pipeline.
-    pub fn exec(&mut self, db: &DB, replication: &Replication) -> RespType {
-        let responses = self
-            .commands
-            .iter()
-            .map(|cmd| cmd.execute(db, replication))
-            .collect::<Vec<RespType>>();
+    pub async fn exec(&mut self, db: &DB, replication: &Replication) -> RespType {
+        let mut responses: Vec<RespType> = vec![];
 
+        for cmd in self.commands.iter() {
+            // execute the command
+            let res = cmd.execute(db, replication);
+
+            // send commands to replica if required
+            if let Some(replica_cmd) = cmd.replication_cmd() {
+                replication.write_to_replicas(replica_cmd).await;
+            };
+
+            responses.push(res);
+        }
+
+        // discard txn after executing all commands
         self.discard();
 
         RespType::Array(responses)

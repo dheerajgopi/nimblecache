@@ -5,6 +5,7 @@ use info::Info;
 use lpush::LPush;
 use lrange::LRange;
 use ping::Ping;
+use psync::Psync;
 use rpush::RPush;
 use set::Set;
 
@@ -14,8 +15,9 @@ mod get;
 mod info;
 mod lpush;
 mod lrange;
-mod ping;
+pub mod ping;
 pub mod pipelining;
+pub mod psync;
 mod rpush;
 mod set;
 
@@ -40,6 +42,8 @@ pub enum Command {
     RPush(RPush),
     /// The LRANGE command.
     LRange(LRange),
+    /// The PSYNC command.
+    Psync(Psync),
 }
 
 impl Command {
@@ -101,6 +105,13 @@ impl Command {
                     Err(e) => return Err(e),
                 }
             }
+            "psync" => {
+                let cmd = Psync::with_args(Vec::from(args));
+                match cmd {
+                    Ok(cmd) => Command::Psync(cmd),
+                    Err(e) => return Err(e),
+                }
+            }
             _ => {
                 return Err(CommandError::UnknownCommand(ErrUnknownCommand {
                     cmd: cmd_name,
@@ -135,6 +146,18 @@ impl Command {
             Command::LPush(lpush) => lpush.apply(db),
             Command::RPush(rpush) => rpush.apply(db),
             Command::LRange(lrange) => lrange.apply(db),
+            Command::Psync(psync) => psync.apply(replication),
+        }
+    }
+
+    /// Builds the RESP command which is to be sent as part of replication stream.
+    /// Returns None if the command is for READ operation.
+    pub fn replication_cmd(&self) -> Option<RespType> {
+        match self {
+            Command::Set(set) => Some(set.build_command()),
+            Command::LPush(lpush) => Some(lpush.build_command()),
+            Command::RPush(rpush) => Some(rpush.build_command()),
+            _ => None,
         }
     }
 }
