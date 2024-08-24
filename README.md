@@ -14,3 +14,15 @@ as a reference.
 ### Run the Nimblecache server
 
 Run `make run-dev` to run the Nimblecache server on port 6379.
+
+## Supported Redis Commands:
+
+- PING
+- INFO (Partial)
+- SET (Without expiry)
+- GET
+- LPUSH
+- RPUSH
+- LRANGE
+- MULTI
+- EXEC
