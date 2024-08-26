@@ -3,14 +3,17 @@
 // anyhow provides the Error and Result types for convenient error handling
 use anyhow::{Error, Result};
 
+use bytes::BytesMut;
 // log crate provides macros for logging at various levels (error, warn, info, debug, trace)
 use log::error;
 
 use tokio::{
     // AsyncWriteExt trait provides asynchronous write methods like write_all
-    io::AsyncWriteExt,
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
+
+use crate::resp::types::RespType;
 
 /// The Server struct holds the tokio TcpListener which listens for
 /// incoming TCP connections.
@@ -44,8 +47,21 @@ impl Server {
             // Spawn a new asynchronous task to handle the connection.
             // This allows the server to handle multiple connections concurrently.
             tokio::spawn(async move {
-                // Write a "Hello!" message to the client.
-                if let Err(e) = &mut sock.write_all("Hello!".as_bytes()).await {
+                // read the TCP message and move the raw bytes into a buffer
+                let mut buffer = BytesMut::with_capacity(512);
+                if let Err(e) = sock.read_buf(&mut buffer).await {
+                    panic!("Error reading request: {}", e);
+                }
+
+                // Try parsing the RESP data from the bytes in the buffer.
+                // If parsing fails return the error message as a RESP SimpleError data type.
+                let resp_data = match RespType::parse(buffer) {
+                    Ok((data, _)) => data,
+                    Err(e) => RespType::SimpleError(format!("{}", e)),
+                };
+
+                // Echo the RESP message back to the client.
+                if let Err(e) = &mut sock.write_all(&resp_data.to_bytes()[..]).await {
                     // Log the error and panic if there is an issue writing the response.
                     error!("{}", e);
                     panic!("Error writing response")

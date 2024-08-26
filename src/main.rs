@@ -1,6 +1,7 @@
 // src/main.rs
 
 // Include the server module defined in server.rs
+mod resp;
 mod server;
 
 use crate::server::Server;
@@ -24,7 +25,7 @@ async fn main() -> Result<()> {
         Ok(tcp_listener) => {
             info!("TCP listener started on port 6379");
             tcp_listener
-        },
+        }
         // If there is an error, panic and print the error message
         // This could happen if the port is already in use, for example
         Err(e) => panic!("Could not bind the TCP listener to {}. Err: {}", &addr, e),
