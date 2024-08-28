@@ -1,6 +1,7 @@
 // src/main.rs
 
 // Include the server module defined in server.rs
+mod handler;
 mod resp;
 mod server;
 

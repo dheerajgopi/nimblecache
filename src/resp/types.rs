@@ -7,6 +7,8 @@ pub enum RespType {
     BulkString(String),
     /// Refer <https://redis.io/docs/latest/develop/reference/protocol-spec/#simple-errors>
     SimpleError(String),
+    /// Refer <https://redis.io/docs/latest/develop/reference/protocol-spec/#arrays>
+    Array(Vec<RespType>),
 }
 
 use super::RespError;
@@ -125,8 +127,85 @@ impl RespType {
                 let bulkstr_bytes = format!("${}\r\n{}\r\n", bs.chars().count(), bs).into_bytes();
                 Bytes::from_iter(bulkstr_bytes)
             }
+            RespType::Array(arr) => {
+                let mut arr_bytes = format!("*{}\r\n", arr.len()).into_bytes();
+                arr.iter()
+                    .map(|v| v.to_bytes())
+                    .for_each(|b| arr_bytes.extend(b));
+
+                Bytes::from_iter(arr_bytes)
+            }
             RespType::SimpleError(es) => Bytes::from_iter(format!("-{}\r\n", es).into_bytes()),
         };
+    }
+
+    /// Parses the length of a RESP array from the given byte buffer.
+    ///
+    /// This function attempts to read the first few bytes of a RESP array to determine its length.
+    /// It expects the input to start with a '*' character followed by the length and terminated by CRLF.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` - A `BytesMut` containing the bytes to parse.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((usize, usize)))` - If successful, returns a tuple containing:
+    ///   - The parsed length of the array
+    ///   - The number of bytes read from the input
+    /// * `Ok(None)` - If there's not enough data in the buffer to parse the length
+    /// * `Err(RespError)` - If the input is not a valid RESP array prefix or if parsing fails
+    pub fn parse_array_len(src: BytesMut) -> Result<Option<(usize, usize)>, RespError> {
+        let (array_prefix_bytes, bytes_read) = match Self::read_till_crlf(&src[..]) {
+            Some((b, size)) => (b, size),
+            None => return Ok(None),
+        };
+
+        if bytes_read < 4 || array_prefix_bytes[0] as char != '*' {
+            return Err(RespError::InvalidArray(String::from(
+                "Not a valid RESP array",
+            )));
+        }
+
+        match Self::parse_usize_from_buf(&array_prefix_bytes[1..]) {
+            Ok(len) => Ok(Some((len, bytes_read))),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Parses the length of a RESP bulk string from the given byte buffer.
+    ///
+    /// This function attempts to read the first few bytes of a RESP bulk string to determine its length.
+    /// It expects the input to start with a '$' character followed by the length and terminated by CRLF.
+    ///
+    /// # Arguments
+    ///
+    /// * `src` - A `BytesMut` containing the bytes to parse.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Some((usize, usize)))` - If successful, returns a tuple containing:
+    ///   - The parsed length of the bulk string
+    ///   - The number of bytes read from the input
+    /// * `Ok(None)` - If there's not enough data in the buffer to parse the length
+    /// * `Err(RespError)` - If the input is not a valid RESP bulk string prefix or if parsing fails
+    ///
+    pub fn parse_bulk_string_len(src: BytesMut) -> Result<Option<(usize, usize)>, RespError> {
+        let (bulkstr_prefix_bytes, bytes_read) = match Self::read_till_crlf(&src[..]) {
+            Some((b, size)) => (b, size),
+            None => return Ok(None),
+        };
+
+        if bytes_read < 4 || bulkstr_prefix_bytes[0] as char != '$' {
+            return Err(RespError::InvalidBulkString(String::from(
+                "Not a valid RESP bulk string",
+            )));
+        }
+
+        match Self::parse_usize_from_buf(&bulkstr_prefix_bytes[1..]) {
+            Ok(len) => Ok(Some((len, bytes_read))),
+            Err(e) => Err(e),
+        }
     }
 
     // Read the bytes till reaching CRLF ("\r\n")
