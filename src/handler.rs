@@ -6,7 +6,10 @@ use log::error;
 use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
-use crate::resp::{frame::RespCommandFrame, types::RespType};
+use crate::{
+    command::Command,
+    resp::{frame::RespCommandFrame, types::RespType},
+};
 
 /// Handles RESP command frames over a single TCP connection.
 pub struct FrameHandler {
@@ -22,7 +25,7 @@ impl FrameHandler {
     /// Handles incoming RESP command frames.
     ///
     /// This method continuously reads command frames from the connection,
-    /// and echo it back to the client. It continues until
+    /// processes them, and sends back the responses. It continues until
     /// an error occurs or the connection is closed.
     ///
     /// # Returns
@@ -37,8 +40,18 @@ impl FrameHandler {
         while let Some(resp_cmd) = self.conn.next().await {
             match resp_cmd {
                 Ok(cmd_frame) => {
+                    // Read the command from the frame.
+                    let resp_cmd = Command::from_resp_command_frame(cmd_frame);
+
+                    // Execute the command and get the RESP response.
+                    // If command fails, return RESP SimpleError as response.
+                    let response = match resp_cmd {
+                        Ok(cmd) => cmd.execute(),
+                        Err(e) => RespType::SimpleError(format!("{}", e)),
+                    };
+
                     // Write the RESP response into the TCP stream.
-                    if let Err(e) = self.conn.send(RespType::Array(cmd_frame)).await {
+                    if let Err(e) = self.conn.send(response).await {
                         error!("Error sending response: {}", e);
                         break;
                     }
