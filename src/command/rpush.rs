@@ -74,10 +74,16 @@ impl RPush {
     }
 
     pub fn build_command(&self) -> RespType {
-        RespType::Array(vec![
+        let mut args: Vec<RespType> = vec![
             RespType::BulkString(String::from("RPUSH")),
             RespType::BulkString(self.key.clone()),
-            RespType::BulkString(self.values.clone().join(" ")),
-        ])
+        ];
+
+        let arg_vals = self.values.clone();
+        for arg in arg_vals.iter() {
+            args.push(RespType::BulkString(arg.to_string()));
+        }
+
+        RespType::Array(args)
     }
 }
