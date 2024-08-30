@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, VecDeque},
-    sync::{Arc, Mutex},
+    sync::{Arc, RwLock},
 };
 
 use super::DBError;
@@ -11,16 +11,10 @@ pub struct Storage {
     db: Arc<DB>,
 }
 
-/// This struct holds the data behind a mutex.
+/// This struct holds the data behind a RwLock.
 #[derive(Debug)]
 pub struct DB {
-    data: Mutex<Data>,
-}
-
-/// The data is stored using a simple HashMap.
-#[derive(Debug)]
-pub struct Data {
-    entries: HashMap<String, Entry>,
+    data: RwLock<HashMap<String, Entry>>,
 }
 
 /// This struct represents the value stored against a key in the database.
@@ -52,9 +46,7 @@ impl DB {
     /// Create a new instance of DB.
     pub fn new() -> DB {
         DB {
-            data: Mutex::new(Data {
-                entries: HashMap::new(),
-            }),
+            data: RwLock::new(HashMap::new()),
         }
     }
 
@@ -69,12 +61,12 @@ impl DB {
     /// * `Ok(Option<String>)` - `Some(String)` if key is found in DB, else `None`
     /// * `Err(DBError)` - if key already exists and has non-string data.
     pub fn get(&self, k: &str) -> Result<Option<String>, DBError> {
-        let data = match self.data.lock() {
+        let data = match self.data.read() {
             Ok(data) => data,
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.entries.get(k) {
+        let entry = match data.get(k) {
             Some(entry) => entry,
             None => return Ok(None),
         };
@@ -99,12 +91,12 @@ impl DB {
     /// * `Ok(())` - If value is successfully added against the key.
     /// * `Err(DBError)` - if key already exists and has non-string data.
     pub fn set(&self, k: String, v: Value) -> Result<(), DBError> {
-        let mut data = match self.data.lock() {
+        let mut data = match self.data.write() {
             Ok(data) => data,
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.entries.get(k.as_str()) {
+        let entry = match data.get(k.as_str()) {
             Some(entry) => Some(entry),
             None => None,
         };
@@ -116,7 +108,7 @@ impl DB {
             }
         }
 
-        data.entries.insert(k.to_string(), Entry::new(v));
+        data.insert(k.to_string(), Entry::new(v));
 
         return Ok(());
     }
@@ -136,12 +128,12 @@ impl DB {
     /// * `Ok(())` - If values are added successfully to the head of the list.
     /// * `Err(DBError)` - if key already exists and has non-list data.
     pub fn lpush(&self, k: String, v: Vec<String>) -> Result<usize, DBError> {
-        let mut data = match self.data.lock() {
+        let mut data = match self.data.write() {
             Ok(data) => data,
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.entries.get_mut(k.as_str()) {
+        let entry = match data.get_mut(k.as_str()) {
             Some(entry) => Some(entry),
             None => None,
         };
@@ -162,8 +154,7 @@ impl DB {
             None => {
                 let list = VecDeque::from(v);
                 let l_len = list.len();
-                data.entries
-                    .insert(k.to_string(), Entry::new(Value::List(list)));
+                data.insert(k.to_string(), Entry::new(Value::List(list)));
 
                 Ok(l_len)
             }
@@ -185,12 +176,12 @@ impl DB {
     /// * `Ok(())` - If value are added successfully to the tail of the list.
     /// * `Err(DBError)` - if key already exists and has non-list data.
     pub fn rpush(&self, k: String, v: Vec<String>) -> Result<usize, DBError> {
-        let mut data = match self.data.lock() {
+        let mut data = match self.data.write() {
             Ok(data) => data,
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.entries.get_mut(k.as_str()) {
+        let entry = match data.get_mut(k.as_str()) {
             Some(entry) => Some(entry),
             None => None,
         };
@@ -211,8 +202,7 @@ impl DB {
             None => {
                 let list = VecDeque::from(v);
                 let l_len = list.len();
-                data.entries
-                    .insert(k.to_string(), Entry::new(Value::List(list)));
+                data.insert(k.to_string(), Entry::new(Value::List(list)));
 
                 Ok(l_len)
             }
@@ -239,12 +229,12 @@ impl DB {
     /// * `Ok(Vec<String>)` - If values are retrieved successfully from the list.
     /// * `Err(DBError)` - if key already exists and has non-list data.
     pub fn lrange(&self, k: String, start_idx: i64, stop_idx: i64) -> Result<Vec<String>, DBError> {
-        let data = match self.data.lock() {
+        let data = match self.data.read() {
             Ok(data) => data,
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.entries.get(k.as_str()) {
+        let entry = match data.get(k.as_str()) {
             Some(entry) => entry,
             None => return Ok(vec![]),
         };
