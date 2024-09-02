@@ -2,17 +2,25 @@
 
 use core::fmt;
 
+use get::Get;
 use ping::Ping;
+use set::Set;
 
-use crate::resp::types::RespType;
+use crate::{resp::types::RespType, storage::db::DB};
 
+mod get;
 mod ping;
+mod set;
 
 /// Represents the supported Nimblecache commands.
 #[derive(Debug, Clone)]
 pub enum Command {
     /// The PING command.
     Ping(Ping),
+    /// The SET command.
+    Set(Set),
+    /// The GET command.
+    Get(Get),
 }
 
 impl Command {
@@ -36,6 +44,20 @@ impl Command {
 
         let cmd = match cmd_name.to_lowercase().as_str() {
             "ping" => Command::Ping(Ping::with_args(Vec::from(args))?),
+            "set" => {
+                let cmd = Set::with_args(Vec::from(args));
+                match cmd {
+                    Ok(cmd) => Command::Set(cmd),
+                    Err(e) => return Err(e),
+                }
+            }
+            "get" => {
+                let cmd = Get::with_args(Vec::from(args));
+                match cmd {
+                    Ok(cmd) => Command::Get(cmd),
+                    Err(e) => return Err(e),
+                }
+            }
             _ => {
                 return Err(CommandError::UnknownCommand(ErrUnknownCommand {
                     cmd: cmd_name,
@@ -48,12 +70,18 @@ impl Command {
 
     /// Executes the Nimblecache command.
     ///
+    /// # Arguments
+    ///
+    /// * `db` - Reference to the database where the key-value pairs are stored.
+    ///
     /// # Returns
     ///
     /// The result of the command execution as a `RespType`.
-    pub fn execute(&self) -> RespType {
+    pub fn execute(&self, db: &DB) -> RespType {
         match self {
             Command::Ping(ping) => ping.apply(),
+            Command::Set(set) => set.apply(db),
+            Command::Get(get) => get.apply(db),
         }
     }
 }
