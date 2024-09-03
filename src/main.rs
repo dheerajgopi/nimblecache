@@ -5,13 +5,18 @@ mod resp;
 mod server;
 mod storage;
 
+use std::sync::Arc;
+
 use crate::server::Server;
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Error, Result};
 use clap::Parser;
 use log::{error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use replication::{master::MasterServer, Replication};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::{
+    net::{TcpListener, TcpStream},
+    sync::mpsc,
+};
 
 const DEFAULT_PORT: u16 = 6379;
 
@@ -31,30 +36,52 @@ struct Cli {
     pub replica_of: String,
 }
 
+/// Accepts a new TCP connection.
+///
+/// This method attempts to accept a new connection from the TCP listener.
+///
+/// # Returns
+///
+/// A `Result` containing the accepted `TcpStream` if successful.
+///
+/// # Errors
+///
+/// Returns an error if there's an issue accepting the connection.
+async fn accept_conn(listener: &TcpListener) -> Result<TcpStream> {
+    loop {
+        match listener.accept().await {
+            Ok((sock, _)) => return Ok(sock),
+            Err(e) => return Err(Error::from(e)),
+        }
+    }
+}
+
 fn main() -> Result<()> {
+    let cli = Cli::parse();
+    let port = cli.port.unwrap_or(DEFAULT_PORT);
+
     let async_runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(8)
         .thread_name("acceptor-pool")
-        .thread_stack_size(2 * 1024)
+        .thread_stack_size(2 * 1024 * 1024)
         // .global_queue_interval(64)
         // .event_interval(200)
-        .max_io_events_per_tick(2048)
+        // .max_io_events_per_tick(2048)
         .enable_all()
         .build()
         .unwrap();
 
-    async_runtime.block_on(async {
-        env_logger::init();
+    let cmd_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(8)
+        .thread_name("cmd-pool")
+        .thread_stack_size(2 * 1024 * 1024)
+        .enable_all()
+        .build()
+        .unwrap();
 
-        let cli = Cli::parse();
-        let port = cli.port.unwrap_or(DEFAULT_PORT);
+    let (tx, mut rx) = mpsc::channel::<TcpStream>(1000);
 
-        let addr = format!("127.0.0.1:{}", port);
-        let listener = match TcpListener::bind(&addr).await {
-            Ok(tcp_listener) => tcp_listener,
-            Err(e) => panic!("Could not bind the TCP listener to {}. Err: {}", &addr, e),
-        };
-
+    cmd_runtime.spawn(async move {
         // Generate a 40 character alphanumeric replication id.
         // If server is started as a slave, try parsing the master host and port
         let replication_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 40);
@@ -103,18 +130,108 @@ fn main() -> Result<()> {
 
         info!("Started TCP listener on port {}", port);
 
-        let mut server = Server::new(listener, shared_storage, replication);
-        if let Err(err) = server.listen().await {
-            error!("failed to process the request: {}", err);
+        let db = shared_storage.db().clone();
+        let mut server = Server::new(shared_storage, replication.clone());
+
+        while let Some(stream) = rx.recv().await {
+            if let Err(err) = server.listen(stream).await {
+                error!("failed to process the request: {}", err);
+            }
         }
-        // tokio::select! {
-        //     res = server.listen() => {
-        //         if let Err(err) = res {
-        //             error!("failed to process the request: {}", err);
-        //         }
-        //     }
-        // }
     });
+
+    async_runtime.block_on(async move {
+        let addr = format!("127.0.0.1:{}", port);
+        let listener = match TcpListener::bind(&addr).await {
+            Ok(tcp_listener) => tcp_listener,
+            Err(e) => panic!("Could not bind the TCP listener to {}. Err: {}", &addr, e),
+        };
+
+        loop {
+            let sock = match accept_conn(&listener).await {
+                Ok(stream) => stream,
+                Err(e) => {
+                    error!("{}", e);
+                    panic!("Error accepting connection");
+                }
+            };
+
+            let _ = tx.clone().send(sock).await;
+        }
+    });
+
+    // async_runtime.block_on(async {
+    //     env_logger::init();
+
+    //     let cli = Cli::parse();
+    //     let port = cli.port.unwrap_or(DEFAULT_PORT);
+
+    //     let addr = format!("127.0.0.1:{}", port);
+    //     let listener = match TcpListener::bind(&addr).await {
+    //         Ok(tcp_listener) => tcp_listener,
+    //         Err(e) => panic!("Could not bind the TCP listener to {}. Err: {}", &addr, e),
+    //     };
+
+    //     // Generate a 40 character alphanumeric replication id.
+    //     // If server is started as a slave, try parsing the master host and port
+    //     let replication_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 40);
+    //     let mut master_stream: Option<TcpStream> = None;
+    //     let master_host_port = match cli.parse_master_host_port() {
+    //         Ok(hp) => hp,
+    //         Err(e) => panic!("{}", e),
+    //     };
+
+    //     // Try connecting to master server.
+    //     // A panic can occur if the server fails to connect with the master server.
+    //     if let Some((host, port)) = master_host_port.clone() {
+    //         let master_addr = format!("{}:{}", host, port,);
+    //         master_stream = match TcpStream::connect(master_addr.clone()).await {
+    //             Ok(stream) => Some(stream),
+    //             Err(e) => {
+    //                 error!("{}", e);
+    //                 panic!("Failed to connect with master at {}", master_addr);
+    //             }
+    //         };
+    //     }
+
+    //     let replication = Replication::new(replication_id, master_host_port);
+
+    //     // initialize storage
+    //     let shared_storage = storage::db::Storage::new(storage::db::DB::new());
+
+    //     // If slave server, initialize master server listener
+    //     if let Some(stream) = master_stream {
+    //         let stream = match MasterServer::perform_handshake(stream).await {
+    //             Ok(s) => s,
+    //             Err(e) => panic!("Handshake with master server failed with error: {}", e),
+    //         };
+    //         let master_svr_storage = shared_storage.clone();
+    //         let master_svr_replication = replication.clone();
+    //         tokio::spawn(async move {
+    //             tokio::select! {
+    //                 res = MasterServer::listen(stream, master_svr_storage, master_svr_replication) => {
+    //                     if let Err(err) = res {
+    //                         error!("failed to process the request from master: {}", err);
+    //                     }
+    //                 }
+    //             }
+    //         });
+    //     }
+
+    //     info!("Started TCP listener on port {}", port);
+
+    //     let mut server = Server::new(listener, shared_storage, replication);
+    //     if let Err(err) = server.listen().await {
+    //         error!("failed to process the request: {}", err);
+    //     }
+    //     // tokio::select! {
+    //     //     res = server.listen() => {
+    //     //         if let Err(err) = res {
+    //     //             error!("failed to process the request: {}", err);
+    //     //         }
+    //     //     }
+    //     // }
+    // });
 
     Ok(())
 }

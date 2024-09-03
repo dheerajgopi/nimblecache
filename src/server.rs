@@ -14,7 +14,7 @@ use crate::{
 #[derive(Debug)]
 pub struct Server {
     /// The TCP listener for accepting incoming connections.
-    listener: TcpListener,
+    // listener: TcpListener,
     /// Contains the storage.
     storage: Storage,
     /// Contains the replication info.
@@ -23,9 +23,9 @@ pub struct Server {
 
 impl Server {
     /// Creates a new `Server` instance.
-    pub fn new(listener: TcpListener, storage: Storage, replication: Replication) -> Server {
+    pub fn new(storage: Storage, replication: Replication) -> Server {
         Server {
-            listener,
+            // listener,
             storage,
             replication,
         }
@@ -44,49 +44,38 @@ impl Server {
     ///
     /// This method will return an error if there's an issue with accepting connections.
     /// Note that it will panic if it encounters an error while accepting a connection.
-    pub async fn listen(&mut self) -> Result<()> {
+    pub async fn listen(&mut self, sock: TcpStream) -> Result<()> {
         let db = self.storage.db().clone();
         let replication = Arc::new(self.replication.clone());
+        let resp_command_frame = Framed::with_capacity(sock, RespCommandFrame::new(), 8 * 1024);
 
-        loop {
-            let sock = match self.accept_conn().await {
-                Ok(stream) => stream,
-                Err(e) => {
-                    error!("{}", e);
-                    panic!("Error accepting connection");
-                }
-            };
-
-            let resp_command_frame = Framed::with_capacity(sock, RespCommandFrame::new(), 8 * 1024);
-            let db = Arc::clone(&db);
-            let replication = Arc::clone(&replication);
-
-            tokio::spawn(async move {
-                let handler = FrameHandler::new(resp_command_frame);
-                if let Err(e) = handler.handle(db.as_ref(), replication.as_ref()).await {
-                    error!("Failed to handle command: {}", e);
-                }
-            });
-        }
-    }
-
-    /// Accepts a new TCP connection.
-    ///
-    /// This method attempts to accept a new connection from the TCP listener.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing the accepted `TcpStream` if successful.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if there's an issue accepting the connection.
-    async fn accept_conn(&mut self) -> Result<TcpStream> {
-        loop {
-            match self.listener.accept().await {
-                Ok((sock, _)) => return Ok(sock),
-                Err(e) => return Err(Error::from(e)),
+        tokio::spawn(async move {
+            let handler = FrameHandler::new(resp_command_frame);
+            if let Err(e) = handler.handle(db.as_ref(), replication.as_ref()).await {
+                error!("Failed to handle command: {}", e);
             }
-        }
+        });
+
+        Ok(())
     }
+
+    // Accepts a new TCP connection.
+
+    // This method attempts to accept a new connection from the TCP listener.
+
+    // # Returns
+
+    // A `Result` containing the accepted `TcpStream` if successful.
+
+    // # Errors
+
+    // Returns an error if there's an issue accepting the connection.
+    // async fn accept_conn(&mut self) -> Result<TcpStream> {
+    //     loop {
+    //         match self.listener.accept().await {
+    //             Ok((sock, _)) => return Ok(sock),
+    //             Err(e) => return Err(Error::from(e)),
+    //         }
+    //     }
+    // }
 }
