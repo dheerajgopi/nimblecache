@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use anyhow::{Error, Result};
 use log::error;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpStream;
 use tokio_util::codec::Framed;
 
 use crate::{
@@ -13,40 +12,26 @@ use crate::{
 /// Represents a TCP server that listens for and handles RESP commands.
 #[derive(Debug)]
 pub struct Server {
-    /// The TCP listener for accepting incoming connections.
-    // listener: TcpListener,
     /// Contains the storage.
-    storage: Storage,
+    storage: Arc<Storage>,
     /// Contains the replication info.
-    replication: Replication,
+    replication: Arc<Replication>,
 }
 
 impl Server {
     /// Creates a new `Server` instance.
-    pub fn new(storage: Storage, replication: Replication) -> Server {
+    pub fn new(storage: Arc<Storage>, replication: Arc<Replication>) -> Server {
         Server {
-            // listener,
             storage,
             replication,
         }
     }
 
-    /// Starts listening for incoming connections and handles them.
-    ///
-    /// This method runs in an infinite loop, accepting new connections and spawning
-    /// a new task to handle each one.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating whether the operation succeeded or failed.
-    ///
-    /// # Errors
-    ///
-    /// This method will return an error if there's an issue with accepting connections.
-    /// Note that it will panic if it encounters an error while accepting a connection.
-    pub async fn listen(&mut self, sock: TcpStream) -> Result<()> {
-        let db = self.storage.db().clone();
-        let replication = Arc::new(self.replication.clone());
+    /// Reads the Nimblecache commands as tokio-util frames from the incoming TCP stream,
+    /// and handle them in a separate Tokio async task.
+    pub async fn handle_commands(&mut self, sock: TcpStream) {
+        let db = self.storage.as_ref().db().clone();
+        let replication = Arc::clone(&self.replication);
         let resp_command_frame = Framed::with_capacity(sock, RespCommandFrame::new(), 8 * 1024);
 
         tokio::spawn(async move {
@@ -55,27 +40,5 @@ impl Server {
                 error!("Failed to handle command: {}", e);
             }
         });
-
-        Ok(())
     }
-
-    // Accepts a new TCP connection.
-
-    // This method attempts to accept a new connection from the TCP listener.
-
-    // # Returns
-
-    // A `Result` containing the accepted `TcpStream` if successful.
-
-    // # Errors
-
-    // Returns an error if there's an issue accepting the connection.
-    // async fn accept_conn(&mut self) -> Result<TcpStream> {
-    //     loop {
-    //         match self.listener.accept().await {
-    //             Ok((sock, _)) => return Ok(sock),
-    //             Err(e) => return Err(Error::from(e)),
-    //         }
-    //     }
-    // }
 }

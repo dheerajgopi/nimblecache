@@ -56,11 +56,28 @@ async fn accept_conn(listener: &TcpListener) -> Result<TcpStream> {
     }
 }
 
+/// What's happening in `main`?
+///
+/// * Start 2 tokio runtimes - one for accepting connections,
+/// another for handling the commands from these TCP connections. The TCP streams
+/// from acceptor runtime is passed to command handler runtime using a channel.
+/// Note that values global to the application are passed to the tokio runtimes via separate Arcs.
+///
+/// * Initialize storage.
+///
+/// * Start both acceptor and command handler runtimes.
+///
+/// * If server is started in slave mode, establish connection with master server, perform
+/// a handshake and start listening to the replication stream from the master server. This happens inside
+/// the acceptor tokio runtime.
 fn main() -> Result<()> {
-    let cli = Cli::parse();
-    let port = cli.port.unwrap_or(DEFAULT_PORT);
+    env_logger::init();
 
-    let async_runtime = tokio::runtime::Builder::new_multi_thread()
+    // parse CLI args
+    let cli = Cli::parse();
+
+    // Tokio runtime used for accepting TCP connections
+    let acceptor_runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(8)
         .thread_name("acceptor-pool")
         .thread_stack_size(2 * 1024 * 1024)
@@ -68,58 +85,90 @@ fn main() -> Result<()> {
         // .event_interval(200)
         // .max_io_events_per_tick(2048)
         .enable_all()
-        .build()
-        .unwrap();
+        .build()?;
 
-    let cmd_runtime = tokio::runtime::Builder::new_multi_thread()
+    // Tokio runtime used for handling commands coming through a TCP stream
+    let cmd_handler_runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(8)
-        .thread_name("cmd-pool")
+        .thread_name("cmd-handler-pool")
         .thread_stack_size(2 * 1024 * 1024)
         .enable_all()
-        .build()
-        .unwrap();
+        .build()?;
 
-    let (tx, mut rx) = mpsc::channel::<TcpStream>(1000);
+    // Generate a 40 character alphanumeric replication id.
+    // If server is started as a slave, try parsing the master host and port
+    let replication_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 40);
+    let mut master_stream: Option<std::net::TcpStream> = None;
+    let master_host_port = match cli.parse_master_host_port() {
+        Ok(hp) => hp,
+        Err(e) => panic!("{}", e),
+    };
 
-    cmd_runtime.spawn(async move {
-        // Generate a 40 character alphanumeric replication id.
-        // If server is started as a slave, try parsing the master host and port
-        let replication_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 40);
-        let mut master_stream: Option<TcpStream> = None;
-        let master_host_port = match cli.parse_master_host_port() {
-            Ok(hp) => hp,
-            Err(e) => panic!("{}", e),
-        };
-
-        // Try connecting to master server.
-        // A panic can occur if the server fails to connect with the master server.
-        if let Some((host, port)) = master_host_port.clone() {
-            let master_addr = format!("{}:{}", host, port,);
-            master_stream = match TcpStream::connect(master_addr.clone()).await {
-                Ok(stream) => Some(stream),
-                Err(e) => {
-                    error!("{}", e);
+    // Try connecting to master server.
+    // A panic can occur if the server fails to connect with the master server.
+    if let Some((host, port)) = master_host_port.clone() {
+        let master_addr = format!("{}:{}", host, port,);
+        master_stream = match std::net::TcpStream::connect(master_addr.clone()) {
+            Ok(stream) => {
+                // set to non-blocking since its going to be used inside tokio runtime
+                if let Err(e) = stream.set_nonblocking(true) {
+                    error!("Failed to set master TCP stream to non-blocking: {}", e);
                     panic!("Failed to connect with master at {}", master_addr);
                 }
-            };
+
+                Some(stream)
+            }
+            Err(e) => {
+                error!("{}", e);
+                panic!("Failed to connect with master at {}", master_addr);
+            }
+        };
+    }
+
+    // Wrap the replication details into 2 separate Arcs (1 for each tokio runtimes).
+    let replication = Replication::new(replication_id, master_host_port);
+    let replication_acceptor_arc = Arc::new(replication);
+    let replication_cmd_handler_arc = Arc::clone(&replication_acceptor_arc);
+
+    // Initialize storage and wrap them into 2 separate Arcs (1 for each tokio runtimes)
+    let shared_storage = storage::db::Storage::new(storage::db::DB::new());
+    let storage_acceptor_arc = Arc::new(shared_storage);
+    let storage_cmd_handler_arc = Arc::clone(&storage_acceptor_arc);
+
+    // Channel for sending TcpStreams from acceptor runtime to command handler runtime
+    let (tx, mut rx) = mpsc::channel::<TcpStream>(1000);
+
+    // Spawn task for handling commands (command handler runtime)
+    cmd_handler_runtime.spawn(async move {
+        let mut server = Server::new(storage_cmd_handler_arc, replication_cmd_handler_arc);
+
+        while let Some(stream) = rx.recv().await {
+            server.handle_commands(stream).await
         }
+    });
 
-        let replication = Replication::new(replication_id, master_host_port);
-
-        // initialize storage
-        let shared_storage = storage::db::Storage::new(storage::db::DB::new());
+    // Run the acceptor runtime
+    acceptor_runtime.block_on(async move {
+        let port = cli.port.unwrap_or(DEFAULT_PORT);
 
         // If slave server, initialize master server listener
         if let Some(stream) = master_stream {
-            let stream = match MasterServer::perform_handshake(stream).await {
+            let master_stream = match TcpStream::from_std(stream) {
+                Ok(ms) => ms,
+                Err(e) => {
+                    error!("Error using master TCP stream inside async runtime: {}", e);
+                    panic!("Failed to connect with master TCP stream: {}", e);
+                },
+            };
+
+            let stream = match MasterServer::perform_handshake(master_stream).await {
                 Ok(s) => s,
                 Err(e) => panic!("Handshake with master server failed with error: {}", e),
             };
-            let master_svr_storage = shared_storage.clone();
-            let master_svr_replication = replication.clone();
+
             tokio::spawn(async move {
                 tokio::select! {
-                    res = MasterServer::listen(stream, master_svr_storage, master_svr_replication) => {
+                    res = MasterServer::listen(stream, storage_acceptor_arc, replication_acceptor_arc) => {
                         if let Err(err) = res {
                             error!("failed to process the request from master: {}", err);
                         }
@@ -128,25 +177,16 @@ fn main() -> Result<()> {
             });
         }
 
-        info!("Started TCP listener on port {}", port);
-
-        let db = shared_storage.db().clone();
-        let mut server = Server::new(shared_storage, replication.clone());
-
-        while let Some(stream) = rx.recv().await {
-            if let Err(err) = server.listen(stream).await {
-                error!("failed to process the request: {}", err);
-            }
-        }
-    });
-
-    async_runtime.block_on(async move {
+        // Bind server to the specified port
         let addr = format!("127.0.0.1:{}", port);
         let listener = match TcpListener::bind(&addr).await {
             Ok(tcp_listener) => tcp_listener,
             Err(e) => panic!("Could not bind the TCP listener to {}. Err: {}", &addr, e),
         };
 
+        info!("Started TCP listener on port {}", port);
+
+        // Start accepting TCP connections
         loop {
             let sock = match accept_conn(&listener).await {
                 Ok(stream) => stream,
@@ -159,79 +199,6 @@ fn main() -> Result<()> {
             let _ = tx.clone().send(sock).await;
         }
     });
-
-    // async_runtime.block_on(async {
-    //     env_logger::init();
-
-    //     let cli = Cli::parse();
-    //     let port = cli.port.unwrap_or(DEFAULT_PORT);
-
-    //     let addr = format!("127.0.0.1:{}", port);
-    //     let listener = match TcpListener::bind(&addr).await {
-    //         Ok(tcp_listener) => tcp_listener,
-    //         Err(e) => panic!("Could not bind the TCP listener to {}. Err: {}", &addr, e),
-    //     };
-
-    //     // Generate a 40 character alphanumeric replication id.
-    //     // If server is started as a slave, try parsing the master host and port
-    //     let replication_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 40);
-    //     let mut master_stream: Option<TcpStream> = None;
-    //     let master_host_port = match cli.parse_master_host_port() {
-    //         Ok(hp) => hp,
-    //         Err(e) => panic!("{}", e),
-    //     };
-
-    //     // Try connecting to master server.
-    //     // A panic can occur if the server fails to connect with the master server.
-    //     if let Some((host, port)) = master_host_port.clone() {
-    //         let master_addr = format!("{}:{}", host, port,);
-    //         master_stream = match TcpStream::connect(master_addr.clone()).await {
-    //             Ok(stream) => Some(stream),
-    //             Err(e) => {
-    //                 error!("{}", e);
-    //                 panic!("Failed to connect with master at {}", master_addr);
-    //             }
-    //         };
-    //     }
-
-    //     let replication = Replication::new(replication_id, master_host_port);
-
-    //     // initialize storage
-    //     let shared_storage = storage::db::Storage::new(storage::db::DB::new());
-
-    //     // If slave server, initialize master server listener
-    //     if let Some(stream) = master_stream {
-    //         let stream = match MasterServer::perform_handshake(stream).await {
-    //             Ok(s) => s,
-    //             Err(e) => panic!("Handshake with master server failed with error: {}", e),
-    //         };
-    //         let master_svr_storage = shared_storage.clone();
-    //         let master_svr_replication = replication.clone();
-    //         tokio::spawn(async move {
-    //             tokio::select! {
-    //                 res = MasterServer::listen(stream, master_svr_storage, master_svr_replication) => {
-    //                     if let Err(err) = res {
-    //                         error!("failed to process the request from master: {}", err);
-    //                     }
-    //                 }
-    //             }
-    //         });
-    //     }
-
-    //     info!("Started TCP listener on port {}", port);
-
-    //     let mut server = Server::new(listener, shared_storage, replication);
-    //     if let Err(err) = server.listen().await {
-    //         error!("failed to process the request: {}", err);
-    //     }
-    //     // tokio::select! {
-    //     //     res = server.listen() => {
-    //     //         if let Err(err) = res {
-    //     //             error!("failed to process the request: {}", err);
-    //     //         }
-    //     //     }
-    //     // }
-    // });
 
     Ok(())
 }
