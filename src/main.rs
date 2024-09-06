@@ -15,10 +15,11 @@ use rand::distributions::{Alphanumeric, DistString};
 use replication::{master::MasterServer, Replication};
 use tokio::{
     net::{TcpListener, TcpStream},
-    sync::mpsc,
+    sync::{mpsc, OwnedSemaphorePermit, Semaphore},
 };
 
 const DEFAULT_PORT: u16 = 6379;
+const DEFAULT_MAX_CONNECTIONS: usize = 64;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -34,6 +35,8 @@ struct Cli {
     /// Specify which role is to be assumed by the server (master/slave)
     #[arg(long = "replicaof", default_value = "master")]
     pub replica_of: String,
+    #[arg(long)]
+    max_conn: Option<usize>,
 }
 
 /// Accepts a new TCP connection.
@@ -77,8 +80,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     // Tokio runtime used for accepting TCP connections
-    let acceptor_runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(8)
+    let acceptor_runtime = tokio::runtime::Builder::new_current_thread()
         .thread_name("acceptor-pool")
         .thread_stack_size(2 * 1024 * 1024)
         // .global_queue_interval(64)
@@ -136,14 +138,14 @@ fn main() -> Result<()> {
     let storage_cmd_handler_arc = Arc::clone(&storage_acceptor_arc);
 
     // Channel for sending TcpStreams from acceptor runtime to command handler runtime
-    let (tx, mut rx) = mpsc::channel::<TcpStream>(1000);
+    let (tx, mut rx) = mpsc::channel::<(TcpStream, OwnedSemaphorePermit)>(10);
 
     // Spawn task for handling commands (command handler runtime)
     cmd_handler_runtime.spawn(async move {
         let mut server = Server::new(storage_cmd_handler_arc, replication_cmd_handler_arc);
 
-        while let Some(stream) = rx.recv().await {
-            server.handle_commands(stream).await
+        while let Some((stream, permit)) = rx.recv().await {
+            server.handle_commands(stream, permit).await
         }
     });
 
@@ -187,7 +189,12 @@ fn main() -> Result<()> {
         info!("Started TCP listener on port {}", port);
 
         // Start accepting TCP connections
+        let max_conn = cli.max_conn.unwrap_or(DEFAULT_MAX_CONNECTIONS);
+        let max_conn = Semaphore::new(max_conn);
+        let max_conn = Arc::new(max_conn);
+
         loop {
+            let max_conn_permit = max_conn.clone().acquire_owned().await.unwrap();
             let sock = match accept_conn(&listener).await {
                 Ok(stream) => stream,
                 Err(e) => {
@@ -196,7 +203,7 @@ fn main() -> Result<()> {
                 }
             };
 
-            let _ = tx.clone().send(sock).await;
+            let _ = tx.clone().send((sock, max_conn_permit)).await;
         }
     });
 

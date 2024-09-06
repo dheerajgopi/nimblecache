@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use log::error;
-use tokio::net::TcpStream;
+use tokio::{net::TcpStream, sync::OwnedSemaphorePermit};
 use tokio_util::codec::Framed;
 
 use crate::{
@@ -29,7 +29,7 @@ impl Server {
 
     /// Reads the Nimblecache commands as tokio-util frames from the incoming TCP stream,
     /// and handle them in a separate Tokio async task.
-    pub async fn handle_commands(&mut self, sock: TcpStream) {
+    pub async fn handle_commands(&mut self, sock: TcpStream, permit: OwnedSemaphorePermit) {
         let db = self.storage.as_ref().db().clone();
         let replication = Arc::clone(&self.replication);
         let resp_command_frame = Framed::with_capacity(sock, RespCommandFrame::new(), 8 * 1024);
@@ -39,6 +39,8 @@ impl Server {
             if let Err(e) = handler.handle(db.as_ref(), replication.as_ref()).await {
                 error!("Failed to handle command: {}", e);
             }
+
+            drop(permit);
         });
     }
 }
