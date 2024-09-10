@@ -36,7 +36,7 @@ struct Cli {
     #[arg(long = "replicaof", default_value = "master")]
     pub replica_of: String,
     #[arg(long)]
-    max_conn: Option<usize>,
+    maxclients: Option<usize>,
 }
 
 /// Accepts a new TCP connection.
@@ -50,10 +50,23 @@ struct Cli {
 /// # Errors
 ///
 /// Returns an error if there's an issue accepting the connection.
-async fn accept_conn(listener: &TcpListener) -> Result<TcpStream> {
+async fn accept_conn(
+    listener: &TcpListener,
+    max_conn_permits: Arc<Semaphore>,
+) -> Result<(TcpStream, OwnedSemaphorePermit)> {
     loop {
         match listener.accept().await {
-            Ok((sock, _)) => return Ok(sock),
+            Ok((sock, _)) => {
+                let max_conn_permit = match max_conn_permits.clone().acquire_owned().await {
+                    Ok(permit) => permit,
+                    Err(e) => {
+                        error!("Max connection limit exceeded");
+                        return Err(Error::from(e));
+                    }
+                };
+
+                return Ok((sock, max_conn_permit));
+            }
             Err(e) => return Err(Error::from(e)),
         }
     }
@@ -90,7 +103,7 @@ fn main() -> Result<()> {
         .build()?;
 
     // Tokio runtime used for handling commands coming through a TCP stream
-    let cmd_handler_runtime = tokio::runtime::Builder::new_multi_thread()
+    let cmd_runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(8)
         .thread_name("cmd-handler-pool")
         .thread_stack_size(2 * 1024 * 1024)
@@ -141,7 +154,7 @@ fn main() -> Result<()> {
     let (tx, mut rx) = mpsc::channel::<(TcpStream, OwnedSemaphorePermit)>(10);
 
     // Spawn task for handling commands (command handler runtime)
-    cmd_handler_runtime.spawn(async move {
+    cmd_runtime.spawn(async move {
         let mut server = Server::new(storage_cmd_handler_arc, replication_cmd_handler_arc);
 
         while let Some((stream, permit)) = rx.recv().await {
@@ -189,21 +202,20 @@ fn main() -> Result<()> {
         info!("Started TCP listener on port {}", port);
 
         // Start accepting TCP connections
-        let max_conn = cli.max_conn.unwrap_or(DEFAULT_MAX_CONNECTIONS);
+        let max_conn = cli.maxclients.unwrap_or(DEFAULT_MAX_CONNECTIONS);
         let max_conn = Semaphore::new(max_conn);
         let max_conn = Arc::new(max_conn);
 
         loop {
-            let max_conn_permit = max_conn.clone().acquire_owned().await.unwrap();
-            let sock = match accept_conn(&listener).await {
-                Ok(stream) => stream,
+            let (sock, _permit) = match accept_conn(&listener, max_conn.clone()).await {
+                Ok(stream_with_permit) => stream_with_permit,
                 Err(e) => {
                     error!("{}", e);
                     panic!("Error accepting connection");
                 }
             };
 
-            let _ = tx.clone().send((sock, max_conn_permit)).await;
+            let _ = tx.clone().send((sock, _permit)).await;
         }
     });
 
