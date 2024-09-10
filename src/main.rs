@@ -5,17 +5,19 @@ mod resp;
 mod server;
 mod storage;
 
-use std::sync::Arc;
+use std::{error::Error, sync::Arc, time::Duration};
 
 use crate::server::Server;
-use anyhow::{anyhow, Error, Result};
 use clap::Parser;
 use log::{error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use replication::{master::MasterServer, Replication};
+use resp::types::RespType;
 use tokio::{
+    io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
     sync::{mpsc, OwnedSemaphorePermit, Semaphore},
+    time::timeout,
 };
 
 const DEFAULT_PORT: u16 = 6379;
@@ -39,35 +41,75 @@ struct Cli {
     maxclients: Option<usize>,
 }
 
-/// Accepts a new TCP connection.
+/// Accepts a new TCP connection with connection limit enforcement.
 ///
-/// This method attempts to accept a new connection from the TCP listener.
+/// This function attempts to accept a new connection from the TCP listener while
+/// enforcing a maximum connection limit. It uses a semaphore to track and limit
+/// the number of concurrent connections.
+///
+/// # Process
+///
+/// 1. Attempts to accept a new TCP connection.
+/// 2. If successful, tries to acquire a permit from the semaphore.
+/// 3. If a permit is acquired within 5 seconds, returns the connection and permit.
+/// 4. If the semaphore times out, sends an error message to the client and closes the connection.
+///
+/// # Arguments
+///
+/// * `listener` - A reference to the `TcpListener` accepting connections.
+/// * `max_conn_permits` - An `Arc<Semaphore>` used to limit the number of concurrent connections.
 ///
 /// # Returns
 ///
-/// A `Result` containing the accepted `TcpStream` if successful.
+/// A `Result` containing a tuple of:
+/// - The accepted `TcpStream`
+/// - An `OwnedSemaphorePermit` representing the acquired connection slot
 ///
 /// # Errors
 ///
-/// Returns an error if there's an issue accepting the connection.
+/// Returns a `ConnectionError` in the following cases:
+/// - `ConnectionError::CannotAcquirePermit`: If the semaphore is closed or cannot be acquired.
+/// - `ConnectionError::Timeout`: If acquiring a permit times out (server at capacity).
+/// - `ConnectionError::Other`: For any other errors during the accept process.
 async fn accept_conn(
     listener: &TcpListener,
     max_conn_permits: Arc<Semaphore>,
-) -> Result<(TcpStream, OwnedSemaphorePermit)> {
+) -> Result<(TcpStream, OwnedSemaphorePermit), ConnectionError> {
     loop {
         match listener.accept().await {
-            Ok((sock, _)) => {
-                let max_conn_permit = match max_conn_permits.clone().acquire_owned().await {
-                    Ok(permit) => permit,
-                    Err(e) => {
-                        error!("Max connection limit exceeded");
-                        return Err(Error::from(e));
+            Ok((mut sock, _)) => {
+                match timeout(
+                    Duration::from_secs(5),
+                    max_conn_permits.clone().acquire_owned(),
+                )
+                .await
+                {
+                    Ok(Ok(permit)) => {
+                        return Ok((sock, permit));
                     }
-                };
+                    Ok(Err(_)) => {
+                        error!("Cannot acquire permit for new connection");
+                        return Err(ConnectionError::CannotAcquirePermit);
+                    }
+                    Err(_) => {
+                        if let Err(e) = sock
+                            .write_all(
+                                &RespType::SimpleError(String::from(
+                                    "max number of clients reached",
+                                ))
+                                .to_bytes(),
+                            )
+                            .await
+                        {
+                            error!("Failed to write into TCPStream: {}", e);
+                        }
 
-                return Ok((sock, max_conn_permit));
+                        drop(sock);
+                        return Err(ConnectionError::Timeout);
+                    }
+                }
             }
-            Err(e) => return Err(Error::from(e)),
+            Err(e) => return Err(ConnectionError::Other(e.to_string())),
         }
     }
 }
@@ -86,7 +128,7 @@ async fn accept_conn(
 /// * If server is started in slave mode, establish connection with master server, perform
 /// a handshake and start listening to the replication stream from the master server. This happens inside
 /// the acceptor tokio runtime.
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn Error>> {
     env_logger::init();
 
     // parse CLI args
@@ -211,7 +253,7 @@ fn main() -> Result<()> {
                 Ok(stream_with_permit) => stream_with_permit,
                 Err(e) => {
                     error!("{}", e);
-                    panic!("Error accepting connection");
+                    continue;
                 }
             };
 
@@ -225,7 +267,7 @@ fn main() -> Result<()> {
 impl Cli {
     /// Parse master host and port from the "replicaof" CLI argument.
     /// If value of replicaof = "master", the master host and port wont be set.
-    fn parse_master_host_port(&self) -> Result<Option<(String, u16)>> {
+    fn parse_master_host_port(&self) -> Result<Option<(String, u16)>, ConnectionError> {
         let host_port_str = self.replica_of.clone();
         if host_port_str.to_lowercase().trim() == "master" {
             return Ok(None);
@@ -236,14 +278,16 @@ impl Cli {
         let host = match split.next() {
             Some(h) => h,
             None => {
-                return Err(anyhow!("Invalid value for replicaof. replicaof should be in '<MASTER_HOST> <MASTER_PORT>' format"));
+                return Err(ConnectionError::Other("Invalid value for replicaof. replicaof should be in '<MASTER_HOST> <MASTER_PORT>' format".into()));
             }
         };
 
         let port = match split.next() {
             Some(p) => p,
             None => {
-                return Err(anyhow!("Master port is not specified in replicaof"));
+                return Err(ConnectionError::Other(
+                    "Master port is not specified in replicaof".into(),
+                ));
             }
         };
 
@@ -251,10 +295,35 @@ impl Cli {
         let port = match port {
             Ok(p) => p,
             Err(_) => {
-                return Err(anyhow!("Invalid value for master port in replicaof"));
+                return Err(ConnectionError::Other(
+                    "Invalid value for master port in replicaof".into(),
+                ));
             }
         };
 
         Ok(Some((host.to_string(), port)))
+    }
+}
+
+/// Represents errors that can occur when establishing connection with a client.
+#[derive(Debug)]
+pub enum ConnectionError {
+    /// Represents an error in acquiring permit for accepting connection (Semaphore exhaustion).
+    CannotAcquirePermit,
+    /// Represents an error occured when connection with client got timed out.
+    Timeout,
+    /// Represents any other error with a descriptive message.
+    Other(String),
+}
+
+impl std::fmt::Display for ConnectionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ConnectionError::CannotAcquirePermit => {
+                "Cannot acquire permit for new connection".fmt(f)
+            }
+            ConnectionError::Timeout => "Timed out! cannot connect".fmt(f),
+            ConnectionError::Other(msg) => msg.as_str().fmt(f),
+        }
     }
 }
