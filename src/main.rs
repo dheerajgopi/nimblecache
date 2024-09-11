@@ -13,6 +13,7 @@ use log::{error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use replication::{master::MasterServer, Replication};
 use resp::types::RespType;
+use socket2::{SockRef, TcpKeepalive};
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
@@ -77,7 +78,30 @@ async fn accept_conn(
 ) -> Result<(TcpStream, OwnedSemaphorePermit), ConnectionError> {
     loop {
         match listener.accept().await {
-            Ok((mut sock, _)) => {
+            Ok((mut stream, _)) => {
+                let socket = SockRef::from(&stream);
+
+                let mut ka = TcpKeepalive::new();
+                ka = ka.with_time(Duration::from_secs(60));
+                ka = ka.with_interval(Duration::from_secs(60));
+                if let Err(e) = socket.set_tcp_keepalive(&ka) {
+                    error!("{}", e);
+                    drop(stream);
+                    return Err(ConnectionError::Other(e.to_string()));
+                }
+
+                if let Err(e) = socket.set_nodelay(true) {
+                    error!("{}", e);
+                    drop(stream);
+                    return Err(ConnectionError::Other(e.to_string()));
+                }
+
+                if let Err(e) = socket.set_nonblocking(true) {
+                    error!("{}", e);
+                    drop(stream);
+                    return Err(ConnectionError::Other(e.to_string()));
+                }
+
                 match timeout(
                     Duration::from_secs(5),
                     max_conn_permits.clone().acquire_owned(),
@@ -85,14 +109,14 @@ async fn accept_conn(
                 .await
                 {
                     Ok(Ok(permit)) => {
-                        return Ok((sock, permit));
+                        return Ok((stream, permit));
                     }
                     Ok(Err(_)) => {
                         error!("Cannot acquire permit for new connection");
                         return Err(ConnectionError::CannotAcquirePermit);
                     }
                     Err(_) => {
-                        if let Err(e) = sock
+                        if let Err(e) = stream
                             .write_all(
                                 &RespType::SimpleError(String::from(
                                     "max number of clients reached",
@@ -104,7 +128,7 @@ async fn accept_conn(
                             error!("Failed to write into TCPStream: {}", e);
                         }
 
-                        drop(sock);
+                        drop(stream);
                         return Err(ConnectionError::Timeout);
                     }
                 }
