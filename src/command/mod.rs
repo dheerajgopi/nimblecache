@@ -32,6 +32,8 @@ pub enum Command {
     Multi,
     /// The EXEC command.
     Exec,
+    /// The DISCARD command.
+    Discard,
     /// The SET command.
     Set(Set),
     /// The GET command.
@@ -70,6 +72,7 @@ impl Command {
             "info" => Command::Info(Info::with_args(Vec::from(args))?),
             "multi" => Command::Multi,
             "exec" => Command::Exec,
+            "discard" => Command::Discard,
             "set" => {
                 let cmd = Set::with_args(Vec::from(args));
                 match cmd {
@@ -141,6 +144,8 @@ impl Command {
             Command::Multi => RespType::SimpleString(String::from("OK")),
             // EXEC calls are handled inside FrameHandler.handle too, since it involves executing queued commands.
             Command::Exec => RespType::NullBulkString,
+            // DISCARD calls are handled inside FrameHandler.handle too, since it involves discarding queued commands.
+            Command::Discard => RespType::SimpleString(String::from("OK")),
             Command::Set(set) => set.apply(db),
             Command::Get(get) => get.apply(db),
             Command::LPush(lpush) => lpush.apply(db),

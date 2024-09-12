@@ -85,6 +85,14 @@ impl FrameHandler {
                                     RespType::SimpleError(String::from("EXEC without MULTI"))
                                 }
                             }
+                            Command::Discard => {
+                                if multicommand.is_active() {
+                                    multicommand.discard();
+                                    cmd.execute(db, replication)
+                                } else {
+                                    RespType::SimpleError(String::from("DISCARD without MULTI"))
+                                }
+                            }
                             Command::Psync(psync) => {
                                 let res = psync.apply(replication);
                                 // Write the RESP response into the TCP stream.
