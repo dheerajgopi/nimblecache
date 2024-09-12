@@ -15,6 +15,7 @@ tokio = { version = "1.38.0", features = [
     "net",
     "io-util",
     "sync",
+    "time",
 ] }
 tokio-util = { version = "0.7.11", features = ["codec"] }
 log = "0.4.22"

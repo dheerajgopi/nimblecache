@@ -134,11 +134,11 @@ impl MasterServer {
     /// the replication stream. It uses the same TCP stream which was used for the handshake process.
     pub async fn listen(
         stream: TcpStream,
-        storage: Storage,
-        replication: Replication,
+        storage: Arc<Storage>,
+        replication: Arc<Replication>,
     ) -> Result<()> {
-        let db = storage.db().clone();
-        let replication = Arc::new(replication.clone());
+        let db = storage.as_ref().db().clone();
+        let replication = replication.clone();
 
         // listen to the master server replication stream
         let resp_command_frame = Framed::with_capacity(stream, RespCommandFrame::new(), 8 * 1024);
