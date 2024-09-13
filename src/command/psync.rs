@@ -78,7 +78,7 @@ impl Psync {
 
         let mut res = String::from("FULLRESYNC ");
         res.push_str(replication.id.as_str());
-        res.push_str(" ");
+        res.push(' ');
         res.push_str(offset.as_str());
 
         RespType::SimpleString(res)

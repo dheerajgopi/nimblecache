@@ -96,13 +96,10 @@ impl DB {
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.get(k.as_str()) {
-            Some(entry) => Some(entry),
-            None => None,
-        };
+        let entry = data.get(k.as_str());
 
-        if entry.is_some() {
-            match entry.unwrap().value {
+        if let Some(e) = entry {
+            match e.value {
                 Value::String(_) => {}
                 _ => return Err(DBError::WrongType),
             }
@@ -110,7 +107,7 @@ impl DB {
 
         data.insert(k.to_string(), Entry::new(v));
 
-        return Ok(());
+        Ok(())
     }
 
     /// Add new elements to the head of a list.
@@ -133,10 +130,7 @@ impl DB {
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.get_mut(k.as_str()) {
-            Some(entry) => Some(entry),
-            None => None,
-        };
+        let entry = data.get_mut(k.as_str());
 
         match entry {
             Some(e) => {
@@ -181,10 +175,7 @@ impl DB {
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.get_mut(k.as_str()) {
-            Some(entry) => Some(entry),
-            None => None,
-        };
+        let entry = data.get_mut(k.as_str());
 
         match entry {
             Some(e) => {
@@ -268,7 +259,7 @@ impl DB {
             return (list_len - 1) as usize;
         }
 
-        return idx as usize;
+        idx as usize
     }
 
     /// Round the start and stop indices using `Self::round_list_index` method and return them as
@@ -282,12 +273,10 @@ impl DB {
         let rounded_start_idx = Self::round_list_index(list_len, start_idx);
         let rounded_stop_idx = Self::round_list_index(list_len, stop_idx);
 
-        if rounded_start_idx < rounded_stop_idx {
-            (rounded_start_idx, rounded_stop_idx + 1)
-        } else if rounded_stop_idx < rounded_start_idx {
-            (0, 0)
-        } else {
-            (rounded_start_idx, rounded_start_idx + 1)
+        match rounded_start_idx.cmp(&rounded_stop_idx) {
+            std::cmp::Ordering::Less => (rounded_start_idx, rounded_stop_idx + 1),
+            std::cmp::Ordering::Equal => (rounded_start_idx, rounded_start_idx + 1),
+            std::cmp::Ordering::Greater => (0, 0),
         }
     }
 }

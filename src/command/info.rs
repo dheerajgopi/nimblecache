@@ -2,7 +2,7 @@ use crate::{replication::Replication, resp::types::RespType};
 
 use super::CommandError;
 
-const ALL_INFO_ARGS: [InfoArg; 1] = [InfoArg::REPLICATION];
+const ALL_INFO_ARGS: [InfoArg; 1] = [InfoArg::Replication];
 
 /// Represents the INFO command in Nimblecache.
 #[derive(Debug, Clone)]
@@ -21,7 +21,7 @@ impl Info {
         let mut info_args = vec![];
 
         // get the info sections to be returned
-        if args.len() == 0 {
+        if args.is_empty() {
             info_args.extend(ALL_INFO_ARGS);
         } else {
             for arg in args.iter() {
@@ -48,7 +48,7 @@ impl Info {
 
         for info_arg in self.args.iter() {
             let section = match info_arg {
-                InfoArg::REPLICATION => {
+                InfoArg::Replication => {
                     format!("# Replication\n{}\n", replication.info_str())
                 }
             };
@@ -63,7 +63,7 @@ impl Info {
 /// Arguments supported by the INFO command.
 enum InfoArg {
     /// Info about replication.
-    REPLICATION,
+    Replication,
 }
 
 impl InfoArg {
@@ -83,7 +83,7 @@ impl InfoArg {
         };
 
         match s.to_lowercase().as_str() {
-            "replication" => Ok(InfoArg::REPLICATION),
+            "replication" => Ok(InfoArg::Replication),
             _ => Err(CommandError::Other(String::from(
                 "Invalid argument for INFO command",
             ))),

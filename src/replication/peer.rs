@@ -33,7 +33,7 @@ impl ReplicaPeers {
     ///
     /// # Arguments
     /// * `stream` - The `TcpStream` associated with the new peer.
-    pub async fn add_peer(&self, stream: TcpStream) -> () {
+    pub async fn add_peer(&self, stream: TcpStream) {
         let rx = self.sender.subscribe();
         let peer_arc = self.peers.clone();
         let mut peers = peer_arc.lock().await;

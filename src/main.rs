@@ -76,42 +76,36 @@ async fn accept_conn(
     listener: &TcpListener,
     max_conn_permits: Arc<Semaphore>,
 ) -> Result<(TcpStream, OwnedSemaphorePermit), ConnectionError> {
-    loop {
-        match listener.accept().await {
-            Ok((mut stream, _)) => {
-                match timeout(
-                    Duration::from_secs(5),
-                    max_conn_permits.clone().acquire_owned(),
-                )
-                .await
-                {
-                    Ok(Ok(permit)) => {
-                        return Ok((stream, permit));
-                    }
-                    Ok(Err(_)) => {
-                        error!("Cannot acquire permit for new connection");
-                        return Err(ConnectionError::CannotAcquirePermit);
-                    }
-                    Err(_) => {
-                        if let Err(e) = stream
-                            .write_all(
-                                &RespType::SimpleError(String::from(
-                                    "max number of clients reached",
-                                ))
+    match listener.accept().await {
+        Ok((mut stream, _)) => {
+            match timeout(
+                Duration::from_secs(5),
+                max_conn_permits.clone().acquire_owned(),
+            )
+            .await
+            {
+                Ok(Ok(permit)) => Ok((stream, permit)),
+                Ok(Err(_)) => {
+                    error!("Cannot acquire permit for new connection");
+                    Err(ConnectionError::CannotAcquirePermit)
+                }
+                Err(_) => {
+                    if let Err(e) = stream
+                        .write_all(
+                            &RespType::SimpleError(String::from("max number of clients reached"))
                                 .to_bytes(),
-                            )
-                            .await
-                        {
-                            error!("Failed to write into TCPStream: {}", e);
-                        }
-
-                        drop(stream);
-                        return Err(ConnectionError::Timeout);
+                        )
+                        .await
+                    {
+                        error!("Failed to write into TCPStream: {}", e);
                     }
+
+                    drop(stream);
+                    Err(ConnectionError::Timeout)
                 }
             }
-            Err(e) => return Err(ConnectionError::Other(e.to_string())),
         }
+        Err(e) => Err(ConnectionError::Other(e.to_string())),
     }
 }
 

@@ -21,7 +21,7 @@ impl Get {
     /// * `Ok(Get)` if parsing succeeds.
     /// * `Err(CommandError)` if parsing fails.
     pub fn with_args(args: Vec<RespType>) -> Result<Get, CommandError> {
-        if args.len() < 1 {
+        if args.is_empty() {
             return Err(CommandError::Other(String::from(
                 "Wrong number of arguments specified for 'GET' command",
             )));

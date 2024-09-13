@@ -100,11 +100,7 @@ impl LRange {
     pub fn apply(&self, db: &DB) -> RespType {
         match db.lrange(self.key.clone(), self.start_idx, self.end_idx) {
             Ok(elems) => {
-                let sub_list = elems
-                    .iter()
-                    .cloned()
-                    .map(|e| RespType::BulkString(e))
-                    .collect();
+                let sub_list = elems.iter().cloned().map(RespType::BulkString).collect();
                 RespType::Array(sub_list)
             }
             Err(e) => RespType::SimpleError(format!("{}", e)),

@@ -91,7 +91,7 @@ impl Decoder for RespCommandFrame {
         }
 
         // Read all bytes in buffer
-        while src.len() != 0 {
+        while !src.is_empty() {
             // Validate and check the length of next bulk string
             let (bulkstr_len, bytes_read) = match RespType::parse_bulk_string_len(src.clone()) {
                 Ok(bulkstr_len) => match bulkstr_len {

@@ -21,7 +21,7 @@ impl Ping {
     /// * `Ok(Ping)` if parsing succeeds.
     /// * `Err(CommandError)` if parsing fails.
     pub fn with_args(args: Vec<RespType>) -> Result<Ping, CommandError> {
-        if args.len() == 0 {
+        if args.is_empty() {
             return Ok(Ping { msg: None });
         }
 
