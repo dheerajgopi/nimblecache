@@ -1,9 +1,17 @@
 use std::{
     collections::{HashMap, VecDeque},
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
-use super::DBError;
+use log::{error, info};
+use time::OffsetDateTime;
+use tokio::{
+    sync::broadcast::{self, Receiver, Sender},
+    time::Instant,
+};
+
+use super::{DBError, DBEvent};
 
 /// This struct contains the DB which is shared across all connections.
 #[derive(Debug, Clone)]
@@ -15,6 +23,7 @@ pub struct Storage {
 #[derive(Debug)]
 pub struct DB {
     data: RwLock<HashMap<String, Entry>>,
+    events: Arc<Sender<DBEvent>>,
 }
 
 /// This struct represents the value stored against a key in the database.
@@ -45,8 +54,11 @@ impl Storage {
 impl DB {
     /// Create a new instance of DB.
     pub fn new() -> DB {
+        let (tx, _) = broadcast::channel(1024);
+
         DB {
             data: RwLock::new(HashMap::new()),
+            events: Arc::new(tx),
         }
     }
 
@@ -90,7 +102,12 @@ impl DB {
     ///
     /// * `Ok(())` - If value is successfully added against the key.
     /// * `Err(DBError)` - if key already exists and has non-string data.
-    pub fn set(&self, k: String, v: Value) -> Result<(), DBError> {
+    pub fn set(
+        &self,
+        k: String,
+        v: Value,
+        expiry_ts: Option<OffsetDateTime>,
+    ) -> Result<(), DBError> {
         let mut data = match self.data.write() {
             Ok(data) => data,
             Err(e) => return Err(DBError::Other(format!("{}", e))),
@@ -105,7 +122,19 @@ impl DB {
             }
         }
 
-        data.insert(k.to_string(), Entry::new(v));
+        data.insert(k.clone(), Entry::new(v));
+
+        // let expiry_instant = Instant::now().checked_add(Duration::from_secs(30));
+        if let Some(expiry) = expiry_ts {
+            info!("set expiry");
+            let key = k.clone();
+            let evt = DBEvent::SetKeyExpiry((expiry, key));
+            if let Err(e) = self.events.send(evt) {
+                error!("{}", e);
+                data.remove(&k);
+                return Err(DBError::Other(e.to_string()));
+            }
+        }
 
         Ok(())
     }
@@ -241,6 +270,19 @@ impl DB {
             }
             _ => Err(DBError::WrongType),
         }
+    }
+
+    pub fn del(&self, k: &str) -> Result<Option<Entry>, DBError> {
+        let mut data = match self.data.write() {
+            Ok(data) => data,
+            Err(e) => return Err(DBError::Other(format!("{}", e))),
+        };
+
+        Ok(data.remove(k))
+    }
+
+    pub fn subscribe_events(&self) -> Receiver<DBEvent> {
+        self.events.subscribe()
     }
 
     /// Round index to 0, if the given index value is less than zero.

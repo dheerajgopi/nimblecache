@@ -1,4 +1,12 @@
+use time::OffsetDateTime;
+
 pub mod db;
+pub mod ttl;
+
+#[derive(Debug, Clone)]
+pub enum DBEvent {
+    SetKeyExpiry((OffsetDateTime, String)),
+}
 
 /// Represents errors that can occur during DB operations.
 #[derive(Debug)]

@@ -13,10 +13,11 @@ use log::{error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use replication::{master::MasterServer, Replication};
 use resp::types::RespType;
+use storage::ttl::KeyEvictor;
 use tokio::{
     io::AsyncWriteExt,
     net::{TcpListener, TcpStream},
-    sync::{mpsc, OwnedSemaphorePermit, Semaphore},
+    sync::{mpsc, Notify, OwnedSemaphorePermit, Semaphore},
     time::timeout,
 };
 
@@ -142,6 +143,13 @@ fn main() -> Result<(), Box<dyn Error>> {
         .enable_all()
         .build()?;
 
+    // Tokio runtime used for running background tasks
+    let bg_tasks_runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(2)
+        .thread_name("bg-task-pool")
+        .enable_all()
+        .build()?;
+
     // Generate a 40 character alphanumeric replication id.
     // If server is started as a slave, try parsing the master host and port
     let replication_id = Alphanumeric.sample_string(&mut rand::thread_rng(), 40);
@@ -192,6 +200,12 @@ fn main() -> Result<(), Box<dyn Error>> {
         while let Some((stream, permit)) = rx.recv().await {
             server.handle_commands(stream, permit).await
         }
+    });
+
+    let mut key_evictor =
+        KeyEvictor::new(storage_acceptor_arc.clone().db(), Arc::new(Notify::new()));
+    bg_tasks_runtime.spawn(async move {
+        key_evictor.run().await;
     });
 
     // Run the acceptor runtime

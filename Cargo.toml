@@ -22,3 +22,4 @@ log = "0.4.22"
 env_logger = "0.11.3"
 futures = { version = "0.3", default-features = true }
 rand = "0.8.5"
+time = "0.3.36"
