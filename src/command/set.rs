@@ -70,10 +70,16 @@ impl Set {
                 };
 
                 // set expiry
+                let now = OffsetDateTime::now_utc();
                 match opt {
                     SetOption::PX(ttl) => {
-                        let now = OffsetDateTime::now_utc();
                         expiry = Some(now.saturating_add(Duration::milliseconds(ttl as i64)));
+                    }
+                    SetOption::PXAT(exp_ts_utc) => {
+                        expiry = Some(
+                            OffsetDateTime::UNIX_EPOCH
+                                .saturating_add(Duration::milliseconds(exp_ts_utc as i64)),
+                        );
                     }
                 };
 
@@ -109,18 +115,28 @@ impl Set {
     }
 
     pub fn build_command(&self) -> RespType {
-        RespType::Array(vec![
+        let mut cmd = vec![
             RespType::BulkString(String::from("SET")),
             RespType::BulkString(self.key.clone()),
             RespType::BulkString(self.value.clone()),
-        ])
+        ];
+
+        if let Some(exp_ts) = self.expiry {
+            let ms_from_epoch = (exp_ts - OffsetDateTime::UNIX_EPOCH).whole_milliseconds() as u64;
+            cmd.push(RespType::BulkString(String::from("PXAT")));
+            cmd.push(RespType::BulkString(ms_from_epoch.to_string()));
+        }
+
+        RespType::Array(cmd)
     }
 }
 
 /// Options supported by the SET command.
 enum SetOption {
-    /// Expiry time for the key specified in milliseconds.
+    /// TTL for the key specified in milliseconds.
     PX(u64),
+    /// Specified unix-time for the key expiry specified in milliseconds.
+    PXAT(u64),
 }
 
 impl SetOption {
@@ -147,8 +163,9 @@ impl SetOption {
             }
         };
 
-        match opt_name.to_uppercase().as_str() {
-            "PX" => Self::get_px(opts, start_idx),
+        match opt_name.to_lowercase().as_str() {
+            "px" => Self::get_px(opts, start_idx),
+            "pxat" => Self::get_pxat(opts, start_idx),
             _ => Err(CommandError::Other(String::from(
                 "Invalid option specified",
             ))),
@@ -184,5 +201,36 @@ impl SetOption {
         };
 
         Ok((SetOption::PX(px_val), px_val_idx + 1))
+    }
+
+    /// Parse and return the value for PXAT option along with the next index to start the parsing from the argument list.
+    fn get_pxat(opts: &[&RespType], start_idx: usize) -> Result<(SetOption, usize), CommandError> {
+        let pxat_val_idx = start_idx + 1;
+        if pxat_val_idx >= opts.len() {
+            return Err(CommandError::Other(String::from(
+                "Value for PXAT is not specified. Provide an integer value",
+            )));
+        }
+
+        let pxat_val = opts[pxat_val_idx];
+        let pxat_val = match pxat_val {
+            RespType::BulkString(p) => p,
+            _ => {
+                return Err(CommandError::Other(String::from(
+                    "Value for PXAT should be in bulk string format",
+                )));
+            }
+        };
+        let pxat_val = pxat_val.parse::<u64>();
+        let pxat_val = match pxat_val {
+            Ok(v) => v,
+            Err(_) => {
+                return Err(CommandError::Other(String::from(
+                    "Value for PXAT should be an integer",
+                )));
+            }
+        };
+
+        Ok((SetOption::PXAT(pxat_val), pxat_val_idx + 1))
     }
 }
