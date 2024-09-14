@@ -1,4 +1,18 @@
+use time::OffsetDateTime;
+
 pub mod db;
+pub mod ttl;
+
+/// Represents database events that can occur in the system.
+#[derive(Debug, Clone)]
+pub enum DBEvent {
+    /// Event triggered when a key's expiry time is set.
+    ///
+    /// Contains a tuple with:
+    /// - `OffsetDateTime`: The expiration time for the key.
+    /// - `String`: The key for which the expiry is set.
+    SetKeyExpiry((OffsetDateTime, String)),
+}
 
 /// Represents errors that can occur during DB operations.
 #[derive(Debug)]

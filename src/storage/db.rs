@@ -3,7 +3,11 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use super::DBError;
+use log::error;
+use time::OffsetDateTime;
+use tokio::sync::broadcast::{self, Receiver, Sender};
+
+use super::{DBError, DBEvent};
 
 /// This struct contains the DB which is shared across all connections.
 #[derive(Debug, Clone)]
@@ -15,6 +19,7 @@ pub struct Storage {
 #[derive(Debug)]
 pub struct DB {
     data: RwLock<HashMap<String, Entry>>,
+    events: Arc<Sender<DBEvent>>,
 }
 
 /// This struct represents the value stored against a key in the database.
@@ -45,8 +50,11 @@ impl Storage {
 impl DB {
     /// Create a new instance of DB.
     pub fn new() -> DB {
+        let (tx, _) = broadcast::channel(1024);
+
         DB {
             data: RwLock::new(HashMap::new()),
+            events: Arc::new(tx),
         }
     }
 
@@ -86,26 +94,43 @@ impl DB {
     ///
     /// * `v` - The value to be set against the key.
     ///
+    /// * `expiry_ts` (optional)- Time at which key expires.
+    ///
     /// # Returns
     ///
     /// * `Ok(())` - If value is successfully added against the key.
     /// * `Err(DBError)` - if key already exists and has non-string data.
-    pub fn set(&self, k: String, v: Value) -> Result<(), DBError> {
+    pub fn set(
+        &self,
+        k: String,
+        v: Value,
+        expiry_ts: Option<OffsetDateTime>,
+    ) -> Result<(), DBError> {
         let mut data = match self.data.write() {
             Ok(data) => data,
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = data.get(k.as_str());
+        let existing_entry = data.get(k.as_str());
 
-        if let Some(e) = entry {
+        if let Some(e) = existing_entry {
             match e.value {
                 Value::String(_) => {}
                 _ => return Err(DBError::WrongType),
             }
         }
 
-        data.insert(k.to_string(), Entry::new(v));
+        data.insert(k.clone(), Entry::new(v));
+
+        if let Some(expiry) = expiry_ts {
+            let key = k.clone();
+            let evt = DBEvent::SetKeyExpiry((expiry, key));
+
+            if let Err(e) = self.events.send(evt) {
+                error!("Failed to set expiry: {}", e);
+                return Err(DBError::Other(e.to_string()));
+            }
+        }
 
         Ok(())
     }
@@ -241,6 +266,19 @@ impl DB {
             }
             _ => Err(DBError::WrongType),
         }
+    }
+
+    pub fn del(&self, k: &str) -> Result<Option<Entry>, DBError> {
+        let mut data = match self.data.write() {
+            Ok(data) => data,
+            Err(e) => return Err(DBError::Other(format!("{}", e))),
+        };
+
+        Ok(data.remove(k))
+    }
+
+    pub fn subscribe_events(&self) -> Receiver<DBEvent> {
+        self.events.subscribe()
     }
 
     /// Round index to 0, if the given index value is less than zero.
