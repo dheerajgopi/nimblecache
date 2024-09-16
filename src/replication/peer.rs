@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use bytes::Bytes;
 use log::{error, info};
 use rand::distributions::{Alphanumeric, DistString};
 use tokio::io::AsyncWriteExt;
@@ -14,7 +15,7 @@ use crate::resp::types::RespType;
 #[derive(Debug, Clone)]
 pub struct ReplicaPeers {
     /// The sender used to broadcast the replication stream to the peers.
-    sender: Sender<RespType>,
+    sender: Sender<Bytes>,
     /// The list of connected peers.
     peers: Arc<Mutex<Vec<Peer>>>,
 }
@@ -48,16 +49,20 @@ impl ReplicaPeers {
     ///
     /// # Arguments
     /// * `resp_data` - The `RespType` data to be sent to the replication stream.
-    pub async fn replicate(&self, resp_data: RespType) {
+    pub async fn replicate(&self, resp_data: RespType) -> usize {
         let peers = self.peers.lock().await;
+        let resp_bytes = resp_data.to_bytes();
+        let cmd_bytes_len = resp_bytes.len();
 
         if peers.len() == 0 {
-            return;
+            return cmd_bytes_len;
         }
 
-        if let Err(e) = self.sender.send(resp_data) {
+        if let Err(e) = self.sender.send(resp_bytes) {
             error!("{}", e);
         }
+
+        cmd_bytes_len
     }
 }
 
@@ -67,7 +72,7 @@ struct Peer {
     /// The unique identifier of the peer.
     id: String,
     /// The receiver to listen for replication updates.
-    rx: Arc<Mutex<Receiver<RespType>>>,
+    rx: Arc<Mutex<Receiver<Bytes>>>,
     /// The `TcpStream` associated with the peer.
     stream: Arc<Mutex<TcpStream>>,
 }
@@ -78,7 +83,7 @@ impl Peer {
     /// # Arguments
     /// * `rx` - The receiver to listen for replication updates.
     /// * `stream` - The `TcpStream` associated with the peer.
-    pub fn new(rx: Arc<Mutex<Receiver<RespType>>>, stream: Arc<Mutex<TcpStream>>) -> Peer {
+    pub fn new(rx: Arc<Mutex<Receiver<Bytes>>>, stream: Arc<Mutex<TcpStream>>) -> Peer {
         let id = Alphanumeric.sample_string(&mut rand::thread_rng(), 10);
         Peer { id, rx, stream }
     }
@@ -100,8 +105,8 @@ impl Peer {
             let mut rx = rx.lock().await;
             let mut stream = stream.lock().await;
 
-            while let Ok(resp_data) = rx.recv().await {
-                if let Err(e) = stream.write(&resp_data.to_bytes()).await {
+            while let Ok(resp_bytes) = rx.recv().await {
+                if let Err(e) = stream.write(&resp_bytes).await {
                     error!("Error writing to replica: {}", e);
                     break;
                 }

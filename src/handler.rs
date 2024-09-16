@@ -115,7 +115,9 @@ impl FrameHandler {
                                 } else {
                                     let res = cmd.execute(db, replication);
                                     if let Some(replica_cmd) = cmd.replication_cmd() {
-                                        replication.write_to_replicas(replica_cmd).await;
+                                        let bytes_replicated =
+                                            replication.write_to_replicas(replica_cmd).await;
+                                        replication.incr_offset(bytes_replicated as u64);
                                     };
 
                                     res
@@ -179,7 +181,9 @@ impl FrameHandler {
                         Ok(cmd) => {
                             cmd.execute(db, replication);
                             if let Some(replica_cmd) = cmd.replication_cmd() {
-                                replication.write_to_replicas(replica_cmd).await;
+                                let bytes_replicated =
+                                    replication.write_to_replicas(replica_cmd).await;
+                                replication.incr_offset(bytes_replicated as u64);
                             };
                         }
                         Err(e) => {

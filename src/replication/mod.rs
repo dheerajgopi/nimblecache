@@ -1,3 +1,8 @@
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
+
 use peer::ReplicaPeers;
 use tokio::net::TcpStream;
 
@@ -12,7 +17,7 @@ pub struct Replication {
     /// Unique id assigned to the server.
     pub id: String,
     /// Replication offset.
-    pub offset: u64,
+    pub offset: Arc<AtomicU64>,
     /// Master host. This is set only if the server is started as a slave.
     master_host: Option<String>,
     /// Master port. This is set only if the server is started as a slave.
@@ -29,7 +34,7 @@ impl Replication {
         };
         Replication {
             id,
-            offset: 0,
+            offset: Arc::new(AtomicU64::new(0)),
             master_host,
             master_port,
             replica_peers: ReplicaPeers::new(),
@@ -49,12 +54,18 @@ impl Replication {
         if self.is_slave() {
             s.push_str("slave");
         } else {
+            let offset = self.offset.load(Ordering::SeqCst);
             s.push_str("master\n");
             s.push_str(format!("master_replid:{}\n", self.id).as_str());
-            s.push_str(format!("master_repl_offset:{}\n", self.offset).as_str())
+            s.push_str(format!("master_repl_offset:{}\n", offset).as_str());
         }
 
         s.to_string()
+    }
+
+    /// Increment the offset value with the number of bytes written to the replication stream.
+    pub fn incr_offset(&self, incr_by: u64) {
+        self.offset.fetch_add(incr_by, Ordering::SeqCst);
     }
 
     /// Add a new slave replica.
@@ -63,7 +74,7 @@ impl Replication {
     }
 
     /// Send RESP data which is to be broadcast to all replicas.
-    pub async fn write_to_replicas(&self, resp_data: RespType) {
-        self.replica_peers.replicate(resp_data).await;
+    pub async fn write_to_replicas(&self, resp_data: RespType) -> usize {
+        self.replica_peers.replicate(resp_data).await
     }
 }
