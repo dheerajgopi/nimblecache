@@ -53,7 +53,7 @@ impl Get {
     /// - If key is not found in DB - A `NullBulkString`
     /// - If an error is encountered - A `SimpleError` with an error message
     pub fn apply(&self, db: &DB) -> RespType {
-        match db.get(self.key.as_str()) {
+        match db.get(self.key.clone()) {
             Ok(val) => match val {
                 Some(s) => RespType::BulkString(s),
                 None => RespType::NullBulkString,

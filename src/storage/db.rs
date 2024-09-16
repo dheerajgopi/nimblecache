@@ -1,5 +1,7 @@
 use std::{
     collections::{HashMap, VecDeque},
+    fmt::Display,
+    hash::Hash,
     sync::{Arc, RwLock},
 };
 
@@ -18,8 +20,16 @@ pub struct Storage {
 /// This struct holds the data behind a RwLock.
 #[derive(Debug)]
 pub struct DB {
-    data: RwLock<HashMap<String, Entry>>,
+    data: RwLock<HashMap<Key, Entry>>,
     events: Arc<Sender<DBEvent>>,
+}
+
+/// This struct represents the key in the database. It encloses the value for
+/// the key its expiry (optional).
+#[derive(Debug, Clone)]
+pub struct Key {
+    value: String,
+    expiry: Option<OffsetDateTime>,
 }
 
 /// This struct represents the value stored against a key in the database.
@@ -68,14 +78,14 @@ impl DB {
     ///
     /// * `Ok(Option<String>)` - `Some(String)` if key is found in DB, else `None`
     /// * `Err(DBError)` - if key already exists and has non-string data.
-    pub fn get(&self, k: &str) -> Result<Option<String>, DBError> {
+    pub fn get(&self, k: String) -> Result<Option<String>, DBError> {
         let data = match self.data.read() {
             Ok(data) => data,
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.get(k) {
-            Some(entry) => entry,
+        let (_, entry) = match data.get_key_value(&k.into()) {
+            Some(pair) => pair,
             None => return Ok(None),
         };
 
@@ -111,16 +121,17 @@ impl DB {
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let existing_entry = data.get(k.as_str());
+        let key = Key::new(k.clone(), expiry_ts);
+        let existing_kv_pair = data.get_key_value(&key);
 
-        if let Some(e) = existing_entry {
-            match e.value {
+        if let Some((_, entry)) = existing_kv_pair {
+            match entry.value {
                 Value::String(_) => {}
                 _ => return Err(DBError::WrongType),
             }
         }
 
-        data.insert(k.clone(), Entry::new(v));
+        data.insert(key, Entry::new(v));
 
         if let Some(expiry) = expiry_ts {
             let key = k.clone();
@@ -155,7 +166,8 @@ impl DB {
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = data.get_mut(k.as_str());
+        let key: Key = k.into();
+        let entry = data.get_mut(&key);
 
         match entry {
             Some(e) => {
@@ -173,7 +185,7 @@ impl DB {
             None => {
                 let list = VecDeque::from(v);
                 let l_len = list.len();
-                data.insert(k.to_string(), Entry::new(Value::List(list)));
+                data.insert(key, Entry::new(Value::List(list)));
 
                 Ok(l_len)
             }
@@ -200,7 +212,8 @@ impl DB {
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = data.get_mut(k.as_str());
+        let key: Key = k.into();
+        let entry = data.get_mut(&key);
 
         match entry {
             Some(e) => {
@@ -218,7 +231,7 @@ impl DB {
             None => {
                 let list = VecDeque::from(v);
                 let l_len = list.len();
-                data.insert(k.to_string(), Entry::new(Value::List(list)));
+                data.insert(key, Entry::new(Value::List(list)));
 
                 Ok(l_len)
             }
@@ -250,7 +263,8 @@ impl DB {
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        let entry = match data.get(k.as_str()) {
+        let key: Key = k.into();
+        let entry = match data.get(&key) {
             Some(entry) => entry,
             None => return Ok(vec![]),
         };
@@ -284,7 +298,7 @@ impl DB {
             Err(e) => return Err(DBError::Other(format!("{}", e))),
         };
 
-        Ok(data.remove(k))
+        Ok(data.remove(&k.into()))
     }
 
     /// Delete a list of keys from the DB and return the number of keys deleted.
@@ -308,7 +322,8 @@ impl DB {
         let mut del_keys: Vec<String> = vec![];
 
         for k in keys {
-            let entry_val = data.remove(*k);
+            let key: Key = Key::from(*k);
+            let entry_val = data.remove(&key);
             if entry_val.is_some() {
                 del_count += 1;
                 del_keys.push(k.to_string());
@@ -364,6 +379,50 @@ impl DB {
             std::cmp::Ordering::Equal => (rounded_start_idx, rounded_start_idx + 1),
             std::cmp::Ordering::Greater => (0, 0),
         }
+    }
+}
+
+impl Display for Key {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+impl From<String> for Key {
+    fn from(value: String) -> Self {
+        Key {
+            value,
+            expiry: None,
+        }
+    }
+}
+
+impl From<&str> for Key {
+    fn from(s: &str) -> Self {
+        Key {
+            value: s.to_string(),
+            expiry: None,
+        }
+    }
+}
+
+impl Hash for Key {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.value.hash(state)
+    }
+}
+
+impl PartialEq for Key {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl Eq for Key {}
+
+impl Key {
+    pub fn new(value: String, expiry: Option<OffsetDateTime>) -> Key {
+        Key { value, expiry }
     }
 }
 
