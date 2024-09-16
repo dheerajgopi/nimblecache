@@ -60,6 +60,7 @@ impl KeyEvictor {
 
                             eviction_notifier.notify_one();
                         }
+                        _ => {}
                     },
                     Err(e) => {
                         error!("Error while receiving DB events: {}", e);

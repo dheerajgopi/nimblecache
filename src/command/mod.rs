@@ -1,5 +1,6 @@
 use core::fmt;
 
+use del::Del;
 use get::Get;
 use info::Info;
 use lpush::LPush;
@@ -11,6 +12,7 @@ use set::Set;
 
 use crate::{replication::Replication, resp::types::RespType, storage::db::DB};
 
+mod del;
 mod get;
 mod info;
 mod lpush;
@@ -38,6 +40,8 @@ pub enum Command {
     Set(Set),
     /// The GET command.
     Get(Get),
+    /// The DEL command.
+    Del(Del),
     /// The LPUSH command.
     LPush(LPush),
     /// The RPUSH command.
@@ -84,6 +88,13 @@ impl Command {
                 let cmd = Get::with_args(Vec::from(args));
                 match cmd {
                     Ok(cmd) => Command::Get(cmd),
+                    Err(e) => return Err(e),
+                }
+            }
+            "del" => {
+                let cmd = Del::with_args(Vec::from(args));
+                match cmd {
+                    Ok(cmd) => Command::Del(cmd),
                     Err(e) => return Err(e),
                 }
             }
@@ -148,6 +159,7 @@ impl Command {
             Command::Discard => RespType::SimpleString(String::from("OK")),
             Command::Set(set) => set.apply(db),
             Command::Get(get) => get.apply(db),
+            Command::Del(del) => del.apply(db),
             Command::LPush(lpush) => lpush.apply(db),
             Command::RPush(rpush) => rpush.apply(db),
             Command::LRange(lrange) => lrange.apply(db),

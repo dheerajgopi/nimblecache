@@ -12,6 +12,10 @@ pub enum DBEvent {
     /// - `OffsetDateTime`: The expiration time for the key.
     /// - `String`: The key for which the expiry is set.
     SetKeyExpiry((OffsetDateTime, String)),
+    /// Event triggered when a list of keys are deleted from DB.
+    ///
+    /// Contains the list of keys as a vector of strings.
+    BulkDelKeys(Vec<String>),
 }
 
 /// Represents errors that can occur during DB operations.

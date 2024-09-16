@@ -127,7 +127,7 @@ impl DB {
             let evt = DBEvent::SetKeyExpiry((expiry, key));
 
             if let Err(e) = self.events.send(evt) {
-                error!("Failed to set expiry: {}", e);
+                error!("Failed to send set expiry event: {}", e);
                 return Err(DBError::Other(e.to_string()));
             }
         }
@@ -268,6 +268,16 @@ impl DB {
         }
     }
 
+    /// Delete a key from the DB and return an Option containing its value.
+    ///
+    /// # Arguments
+    ///
+    /// * `k` - The key to be deleted.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(Option<Entry>)` - An Option containing the value stored against the deleted key.
+    /// * `Err(DBError)` - if key deletion fails.
     pub fn del(&self, k: &str) -> Result<Option<Entry>, DBError> {
         let mut data = match self.data.write() {
             Ok(data) => data,
@@ -275,6 +285,44 @@ impl DB {
         };
 
         Ok(data.remove(k))
+    }
+
+    /// Delete a list of keys from the DB and return the number of keys deleted.
+    /// Keys which does not exist in the DB are not considered towards the deleted-keys count.
+    ///
+    /// # Arguments
+    ///
+    /// * `keys` - The list of keys to be deleted.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(usize)` - Number of keys deleted (which were present in the DB).
+    /// * `Err(DBError)` - if key deletion fails.
+    pub fn bulk_del(&self, keys: &[&str]) -> Result<usize, DBError> {
+        let mut data = match self.data.write() {
+            Ok(data) => data,
+            Err(e) => return Err(DBError::Other(format!("{}", e))),
+        };
+
+        let mut del_count: usize = 0;
+        let mut del_keys: Vec<String> = vec![];
+
+        for k in keys {
+            let entry_val = data.remove(*k);
+            if entry_val.is_some() {
+                del_count += 1;
+                del_keys.push(k.to_string());
+            }
+        }
+
+        if !del_keys.is_empty() {
+            if let Err(e) = self.events.send(DBEvent::BulkDelKeys(del_keys)) {
+                error!("Failed to send bulk key deletion event: {}", e);
+                return Err(DBError::Other(e.to_string()));
+            }
+        }
+
+        Ok(del_count)
     }
 
     pub fn subscribe_events(&self) -> Receiver<DBEvent> {
