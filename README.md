@@ -19,8 +19,9 @@ Run `make run-dev` to run the Nimblecache server on port 6379.
 
 - PING
 - INFO (Partial)
-- SET (Without expiry)
+- SET
 - GET
+- DEL
 - LPUSH
 - RPUSH
 - LRANGE
