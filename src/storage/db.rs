@@ -319,19 +319,22 @@ impl DB {
         };
 
         let mut del_count: usize = 0;
-        let mut del_keys: Vec<String> = vec![];
+        let mut del_keys_with_expiry: Vec<(OffsetDateTime, String)> = vec![];
 
         for k in keys {
-            let key: Key = Key::from(*k);
-            let entry_val = data.remove(&key);
-            if entry_val.is_some() {
+            let key = Key::from(*k);
+            let kv_pair = data.remove_entry(&key);
+            if let Some((k, _)) = kv_pair {
                 del_count += 1;
-                del_keys.push(k.to_string());
+
+                if let Some(expiry_ts) = k.expiry {
+                    del_keys_with_expiry.push((expiry_ts, k.value));
+                }
             }
         }
 
-        if !del_keys.is_empty() {
-            if let Err(e) = self.events.send(DBEvent::BulkDelKeys(del_keys)) {
+        if !del_keys_with_expiry.is_empty() {
+            if let Err(e) = self.events.send(DBEvent::BulkDelKeys(del_keys_with_expiry)) {
                 error!("Failed to send bulk key deletion event: {}", e);
                 return Err(DBError::Other(e.to_string()));
             }

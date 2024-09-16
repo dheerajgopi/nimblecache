@@ -172,6 +172,7 @@ impl Command {
     pub fn replication_cmd(&self) -> Option<RespType> {
         match self {
             Command::Set(set) => Some(set.build_command()),
+            Command::Del(del) => Some(del.build_command()),
             Command::LPush(lpush) => Some(lpush.build_command()),
             Command::RPush(rpush) => Some(rpush.build_command()),
             _ => None,

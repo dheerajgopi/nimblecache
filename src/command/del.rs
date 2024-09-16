@@ -56,4 +56,14 @@ impl Del {
             Err(e) => RespType::SimpleError(format!("{}", e)),
         }
     }
+
+    pub fn build_command(&self) -> RespType {
+        let mut cmd = vec![RespType::BulkString(String::from("DEL"))];
+
+        for key in self.keys.iter() {
+            cmd.push(RespType::BulkString(key.to_string()));
+        }
+
+        RespType::Array(cmd)
+    }
 }

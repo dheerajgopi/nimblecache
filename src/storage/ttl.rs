@@ -60,7 +60,13 @@ impl KeyEvictor {
 
                             eviction_notifier.notify_one();
                         }
-                        _ => {}
+                        DBEvent::BulkDelKeys(key_exps) => {
+                            if let Err(e) = Self::remove_deleted_key(key_exps, expiries) {
+                                error!("Error while updating key expiry: {}", e);
+                            }
+
+                            eviction_notifier.notify_one();
+                        }
                     },
                     Err(e) => {
                         error!("Error while receiving DB events: {}", e);
@@ -97,33 +103,6 @@ impl KeyEvictor {
         }
     }
 
-    /// Updates the expiry time for a key in the BTreeSet.
-    ///
-    /// # Arguments
-    ///
-    /// * `key_expiry` - A tuple containing the expiry time and the key.
-    /// * `expiries` - Arc reference to the Mutex-protected BTreeSet of expiries.
-    ///
-    /// # Returns
-    ///
-    /// A Result indicating success or a DBError if the operation fails.
-    fn update_key_expiry(
-        key_expiry: (OffsetDateTime, String),
-        expiries: Arc<Mutex<BTreeSet<(OffsetDateTime, String)>>>,
-    ) -> Result<(), DBError> {
-        let mut expiries = match expiries.lock() {
-            Ok(exp) => exp,
-            Err(e) => {
-                error!("Failed to evict expired keys: {}", e);
-                return Err(DBError::Other("Failed to evict expired keys".to_string()));
-            }
-        };
-
-        expiries.insert(key_expiry);
-
-        Ok(())
-    }
-
     /// Evicts keys that have expired up to the specified time.
     ///
     /// # Arguments
@@ -156,5 +135,62 @@ impl KeyEvictor {
         }
 
         Ok(None)
+    }
+
+    /// Updates the expiry time for a key in the BTreeSet.
+    ///
+    /// # Arguments
+    ///
+    /// * `key_expiry` - A tuple containing the expiry time and the key.
+    /// * `expiries` - Arc reference to the Mutex-protected BTreeSet of expiries.
+    ///
+    /// # Returns
+    ///
+    /// A Result indicating success or a DBError if the operation fails.
+    fn update_key_expiry(
+        key_expiry: (OffsetDateTime, String),
+        expiries: Arc<Mutex<BTreeSet<(OffsetDateTime, String)>>>,
+    ) -> Result<(), DBError> {
+        let mut expiries = match expiries.lock() {
+            Ok(exp) => exp,
+            Err(e) => {
+                error!("Failed to evict expired keys: {}", e);
+                return Err(DBError::Other("Failed to evict expired keys".to_string()));
+            }
+        };
+
+        expiries.insert(key_expiry);
+
+        Ok(())
+    }
+
+    /// Removes the key-expiry entry in the BTreeSet. This is called when a key is
+    /// deleted from the DB manually, for which an expiry was already set before.
+    ///
+    /// # Arguments
+    ///
+    /// * `del_keys` - A tuple containing the list of deleted expiry-key pairs.
+    /// * `expiries` - Arc reference to the Mutex-protected BTreeSet of expiries.
+    ///
+    /// # Returns
+    ///
+    /// A Result indicating success or a DBError if the operation fails.
+    fn remove_deleted_key(
+        del_keys: Vec<(OffsetDateTime, String)>,
+        expiries: Arc<Mutex<BTreeSet<(OffsetDateTime, String)>>>,
+    ) -> Result<(), DBError> {
+        let mut expiries = match expiries.lock() {
+            Ok(exp) => exp,
+            Err(e) => {
+                error!("Failed to remove deleted keys: {}", e);
+                return Err(DBError::Other("Failed to remove deleted keys".to_string()));
+            }
+        };
+
+        for k in del_keys {
+            expiries.remove(&k);
+        }
+
+        Ok(())
     }
 }
