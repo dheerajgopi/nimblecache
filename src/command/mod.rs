@@ -17,6 +17,7 @@ mod lrange;
 mod ping;
 mod rpush;
 mod set;
+pub mod transactions;
 
 /// Represents the supported Nimblecache commands.
 #[derive(Debug, Clone)]
@@ -33,6 +34,12 @@ pub enum Command {
     RPush(RPush),
     /// The LRANGE command.
     LRange(LRange),
+    /// The MULTI command.
+    Multi,
+    /// The EXEC command.
+    Exec,
+    /// The DISCARD command.
+    Discard,
 }
 
 impl Command {
@@ -91,6 +98,9 @@ impl Command {
                     Err(e) => return Err(e),
                 }
             }
+            "multi" => Command::Multi,
+            "exec" => Command::Exec,
+            "discard" => Command::Discard,
             _ => {
                 return Err(CommandError::UnknownCommand(ErrUnknownCommand {
                     cmd: cmd_name,
@@ -118,6 +128,12 @@ impl Command {
             Command::LPush(lpush) => lpush.apply(db),
             Command::RPush(rpush) => rpush.apply(db),
             Command::LRange(lrange) => lrange.apply(db),
+            // MULTI calls are handled inside FrameHandler.handle since it involves command queueing.
+            Command::Multi => RespType::SimpleString(String::from("OK")),
+            // EXEC calls are handled inside FrameHandler.handle too, since it involves executing queued commands.
+            Command::Exec => RespType::NullBulkString,
+            // DISCARD calls are handled inside FrameHandler.handle too, since it involves discarding queued commands.
+            Command::Discard => RespType::SimpleString(String::from("OK")),
         }
     }
 }
